@@ -1,0 +1,25 @@
+{
+  "name": "codely-dsh-bridge",
+  "version": "1.0.0",
+  "description": "让 dsh (DeepSeek Harness) 通过本地代理使用 Codely CLI 账号额度（LiteLLM 网关）",
+  "main": "codely-proxy.js",
+  "bin": {
+    "codely-dsh-proxy": "./codely-proxy.js",
+    "codely-dsh-setup": "./setup.js",
+    "codely-dsh-uninstall": "./uninstall.js"
+  },
+  "scripts": {
+    "login": "node login.js",
+    "start": "node codely-proxy.js",
+    "setup": "node setup.js",
+    "uninstall": "node uninstall.js",
+    "test": "node test/smoke.js"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}
