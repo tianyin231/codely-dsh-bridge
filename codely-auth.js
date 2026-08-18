@@ -118,4 +118,32 @@ async function fetchApiKey(creds) {
   return j.cli_api_key;
 }
 
-module.exports = { loadCreds, getAccessToken, refreshAccessToken, fetchApiKey, LOCAL_CREDS, BASE };
+const LITELLM_HOST = 'codely-litellm.tuanjie.cn';
+
+/* 网关校验的是官方 CLI 的身份特征，缺失会被 400 拒绝（见 PROTOCOL.md §2.2）
+ * 与 codely-proxy.js 的 CLIENT_HEADERS 保持一致（proxy 不可被 require，故各自维护） */
+const CLIENT_HEADERS = {
+  'User-Agent': 'codely-cli/1.0.0-release.41 (win32; x64)',
+  'X-Stainless-Lang': 'js',
+  'X-Stainless-Package-Version': '5.11.0',
+  'X-Stainless-OS': 'Windows',
+  'X-Stainless-Arch': 'x64',
+  'X-Stainless-Runtime': 'node',
+  'X-Stainless-Runtime-Version': 'v24.3.0',
+  'X-Stainless-Retry-Count': '0',
+};
+
+/** 用 sk- 密钥查询当前账号实际可用的模型列表（GET /v1/models）
+ *  返回 upstream 原始 data 数组：[{id, object, created, owned_by, is_alias, max_model_len?}, ...]
+ *  不同账号/会员档位返回的列表不同（如 GLM 系列仅会员可用）。 */
+async function fetchAvailableModels(apiKey) {
+  const res = await fetch(`https://${LITELLM_HOST}/v1/models`, {
+    headers: { ...CLIENT_HEADERS, Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+  });
+  if (!res.ok) throw new Error(`查询可用模型失败: HTTP ${res.status}`);
+  const j = await res.json();
+  if (!Array.isArray(j?.data)) throw new Error('可用模型响应格式异常（缺少 data 数组）');
+  return j.data;
+}
+
+module.exports = { loadCreds, getAccessToken, refreshAccessToken, fetchApiKey, fetchAvailableModels, LOCAL_CREDS, BASE, LITELLM_HOST, CLIENT_HEADERS };

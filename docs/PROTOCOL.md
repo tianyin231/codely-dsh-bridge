@@ -96,6 +96,7 @@ curl https://codely-litellm.tuanjie.cn/v1/chat/completions \
 | HTTP | message | 含义 |
 |---|---|---|
 | 401 | `LiteLLM Virtual Key expected... expected to start with 'sk-'` | 密钥格式/值不对 → 重新换 key |
+| 401 | `team not allowed to access model ... This team can only access models=['alias-only-proxy-models']` | 模型被团队权限拒绝（换 key 无效，密钥幂等）→ 改用 `/v1/models` 列表内的模型（`codely-*`）。2026-08 实测 `GLM-5.2/GLM-5.3` 曾从列表移除，网关多实例灰度期间偶发 200/401 交替 |
 | 400 | `欢迎使用Codely, 访问 ...` | UA 校验未过 → 见 §2.2 |
 | 400 | `非法session` | 缺会话标识 → 见 §2.3 |
 | 405 | `Method Not Allowed`（`/v1/models/<id>:generateContent`） | 网关不开放 Gemini 原生格式，用 OpenAI 格式 |

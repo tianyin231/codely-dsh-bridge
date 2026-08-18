@@ -56,13 +56,18 @@ npm run setup -- --set-default --model codely-core
 
 ## 可用模型
 
+模型列表在 `npm run setup` 时**实时查询** `/v1/models` 自动写入，不写死——不同账号/会员档位可用的模型不同。
+
 | dsh 中的模型 ID | 说明 |
 |---|---|
 | `codely-core` | 旗舰推理模型（1M 上下文） |
 | `codely-flash` | 快速模型（实际路由 DeepSeek-V4-Flash） |
 | `codely-air` / `codely-basic` | 轻量/基础档 |
 | `codely-vl` | 多模态（文本 + 图片） |
-| `GLM-5.2` / `GLM-5.3` | GLM 系列（1M 上下文） |
+| `GLM-5.2` / `GLM-5.3` | GLM 系列（1M 上下文，**需充值会员**，非会员不可用） |
+
+> 查看当前账号实际可用的模型: `npm run models`
+> 升级会员后 GLM 系列恢复可用，重跑 `npm run setup` 即可同步到 dsh。
 
 密钥额度与你在 codely CLI 里用的是同一份（实测速率限制 200 RPM）。
 
@@ -71,7 +76,8 @@ npm run setup -- --set-default --model codely-core
 | 命令 | 作用 |
 |---|---|
 | `npm run login` | 独立登录（设备码流程，浏览器授权一次，凭据存 `codely-creds.json`） |
-| `npm run setup` | 安装/更新配置（自动备份原文件为 `*.bak-codely`） |
+| `npm run models` | 查询当前账号可用的模型列表 |
+| `npm run setup` | 安装/更新配置（自动检测可用模型，备份原文件为 `*.bak-codely`） |
 | `npm start` | 启动代理（默认 `127.0.0.1:8790`，`--port N` 可改端口，需与 setup 的 `--port` 一致） |
 | `npm test` | 冒烟测试（healthz / models / 一次对话） |
 | `npm run uninstall` | 回滚 dsh 配置（优先恢复备份） |
@@ -97,6 +103,7 @@ setup 支持的参数：`--port N`（代理端口）、`--set-default`（设为 
 | `欢迎使用Codely, 访问 https://codely.tuanjie.cn/` | 网关 UA 校验未过——请确认请求走的是本代理而不是直连网关（检查 settings.yaml 里 `codely` 的 baseURL 是 `127.0.0.1:8790`） |
 | `非法session` | 会话标识缺失——同上，必须经过代理；或代理版本过旧 |
 | 代理日志反复 `上游返回 401` | 密钥失效且自动刷新失败 → 重新 `npm run login`，再 `npm run setup` |
+| 代理日志 `模型被团队权限拒绝`，或 dsh 报 `team not allowed to access model` | 上游已把该模型（如 `GLM-5.3`）从你团队可访问列表移除（`/v1/models` 里已无此模型）→ 在 dsh 改用仍在列表内的模型：`codely-core` / `codely-flash` / `codely-air` / `codely-basic` / `codely-vl` |
 | 想确认代理状态 | `curl http://127.0.0.1:8790/healthz` |
 | 换了 Codely 账号/组织 | 重新 `npm run login` + `npm run setup` |
 | 登录时浏览器没自动打开 | 手动复制终端打印的 Verification URL 到浏览器打开 |

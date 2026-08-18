@@ -10,6 +10,7 @@
   },
   "scripts": {
     "login": "node login.js",
+    "models": "node models.js",
     "start": "node codely-proxy.js",
     "setup": "node setup.js",
     "uninstall": "node uninstall.js",

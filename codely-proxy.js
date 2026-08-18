@@ -118,8 +118,22 @@ function attemptForward(req, apiKey, body) {
       },
     }, (ur) => {
       if (ur.statusCode === 401 || ur.statusCode === 403) {
-        ur.resume(); // 丢弃响应体，准备换 key 重试
-        return resolve({ retry: true, status: ur.statusCode });
+        // 先读完响应体：区分「密钥失效」与「模型被团队权限拒绝」两类 401/403
+        const chunks = [];
+        ur.on('data', (c) => chunks.push(c));
+        ur.on('end', () => {
+          const errBody = Buffer.concat(chunks);
+          const text = errBody.toString('utf8');
+          const denied = /team_model_access_denied|not allowed to access model|model_access_denied/i.test(text);
+          if (denied) {
+            // 换 key 无济于事（换 key 幂等、且问题在模型权限）：把上游错误原样透传给客户端
+            log('key', `上游 401: 模型 ${model || '(未知)'} 被团队权限拒绝（透传错误，不刷新密钥）`);
+            return resolve({ retry: false, model, passthrough: { status: ur.statusCode, headers: ur.headers, body: errBody } });
+          }
+          log('key', `上游返回 ${ur.statusCode}，刷新密钥后重试`);
+          resolve({ retry: true, status: ur.statusCode, errBody });
+        });
+        return;
       }
       resolve({ retry: false, ur, model });
     });
@@ -143,9 +157,18 @@ async function handle(req, res, body) {
       const r = await attemptForward(req, apiKey, body);
       if (r.retry) {
         log('key', `上游返回 ${r.status}，刷新密钥后重试`);
-        lastErr = r.status;
+        lastErr = r.errBody ? { status: r.status, body: r.errBody } : r.status;
         try { await refreshKey(); } catch (e) { log('key', `刷新失败: ${e.message}`); }
         continue;
+      }
+      if (r.passthrough) {
+        // 模型被团队权限拒绝：原样透传上游错误，让 dsh 显示真实原因
+        log('proxy', `${req.method} ${req.url} -> ${r.passthrough.status} (${Date.now() - started}ms, 模型被拒透传${r.model ? `, model=${r.model}` : ''})`);
+        const h = { ...r.passthrough.headers };
+        delete h['content-length'];
+        res.writeHead(r.passthrough.status, h);
+        res.end(r.passthrough.body);
+        return;
       }
       log('proxy', `${req.method} ${req.url} -> ${r.ur.statusCode} (${Date.now() - started}ms${r.model ? `, model=${r.model}` : ''})`);
       const h = { ...r.ur.headers };
@@ -161,7 +184,10 @@ async function handle(req, res, body) {
   }
   if (!res.headersSent) {
     res.writeHead(502, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ error: { message: `codely-dsh-bridge: 上游请求失败 (${lastErr})` } }));
+    const reason = typeof lastErr === 'object' && lastErr?.body
+      ? `${lastErr.status}: ${lastErr.body.toString('utf8').slice(0, 300)}`
+      : String(lastErr);
+    res.end(JSON.stringify({ error: { message: `codely-dsh-bridge: 上游请求失败 (${reason})` } }));
   }
 }
 
