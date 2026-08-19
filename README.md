@@ -130,7 +130,7 @@ npm run setup -- --set-default --model codely-core
                               ⚙️ 代理没开就不启用：/health 探测离线时整个隐藏，恢复后自动出现
 ```
 
-**交互**：单击圆环展开/收起详情浮层（点外部 / Esc 收起）；按住可拖拽换位置（localStorage 记忆）；浮层内「刷新」按钮强制刷新。
+**交互**：单击圆环展开/收起详情浮层（点外部 / Esc 收起）；按住可拖拽换位置（localStorage 记忆）；浮层内「刷新」按钮强制刷新；顶部**账号行**多账号时显示切换下拉，一键丝滑切号。
 
 展开后展示四块**实时积分数据**（数据源=官网 `/api/user/billing/usage/summary`，官方口径）：
 
@@ -162,11 +162,58 @@ npm start
 > 装配方式：`npm run setup` 会把插件以 `link:` + bundles 写进 profile（`~/.dsh/profiles/web/package.json`），dsh 启动即自动加载——换机器重跑 setup 即自动完成，无需手工注入。改 `lib/` 代码后刷新页面即可生效（或按插件 README 用 `dev_reload_package` 热重载）。
 > 插件配置：`proxyBaseURL`（默认 `http://127.0.0.1:8790`）、`cacheMs`（host 缓存）、`refreshMs`（悬浮圈自动刷新）。
 
+## 多账号切换（CLI + 小球）
+
+支持把**多个 Codely 账号**登录并保存，随时切换当前账号（额度 / 模型 / 密钥全部跟着变，**无需重启代理**）：
+
+```
+账号注册表（本目录 accounts/，gitignored）
+  accounts/index.json     当前账号 + 账号列表
+  accounts/<name>.json    各账号登录凭据
+  codely-creds.json       始终等于「当前激活账号」凭据（老链路零改动）
+```
+
+**CLI 切换**：
+
+```bash
+npm run account -- list                 # 列出已登录账号（* 标记当前）
+npm run account -- login my-team-a      # 设备码登录新账号并设为当前（浏览器授权）
+npm run account -- switch my-team-b     # 切到另一账号（代理运行时自动重探模型映射）
+npm run account -- show                 # 查看当前账号详情
+npm run account -- remove my-team-a     # 删除账号（删当前账号时自动切到剩下的第一个）
+```
+
+> 也可以直接 `npm run login -- --name my-team-a` 登录并登记。老版本单账号升级后首次
+> `npm run account -- list` 会自动把现有 `codely-creds.json` 导入注册表。
+
+**小球里丝滑切换**：dsh web 右下角**额度圈**（悬浮球）→ 单击展开 → 顶部**账号行**（多账号时出现
+下拉选择器）→ 选择目标账号 → 一键切换：换凭据、换密钥、清配额缓存、重探模型，**圆环平滑过渡到
+新账号的额度比例**，全程免重启。若在 CLI 里切了账号，小球会在健康轮询时自动跟上显示。
+
+**小球里添加新账号**：点账号行右侧 **「+」** —— 发起设备码登录并给出**可复制的验证链接 + 用户码**
+（与 `npm run login` 同一授权逻辑，入口在小球里）。授权完成后自动保存凭据并切换过去，无需碰终端。
+
+> ⚠️ 授权跟随打开链接的浏览器会话：官方授权页是 Unity ID 登录页，**没有「切换账号」按钮**，且
+> **主浏览器直接打开会瞬间授权当前账号并消耗设备码**（再复制到无痕会提示 no longer pending）。
+> 添加另一账号请：**复制链接 → 无痕窗口/另一浏览器打开 → 登录另一 Unity 账号 → 授权**。授权到当前
+> 账号时小球会明确提示；已保存的不同账号之间随时丝滑切换（小球下拉 / `npm run account -- switch`）。
+
+> 原理：小球 → 插件 host API → 本地代理 `POST /account/switch` → 换 `codely-creds.json` + 删
+> `key.cache`/`session.cache`（下次请求自动取新账号密钥、重开会话）+ 重探模型写回
+> `~/.dsh/settings.yaml`。代理新增端点（仅 loopback Host 可访问）：`GET /accounts`（列表）、
+> `POST /account/switch?name=<账号>`（切换）、`POST /account/login/start|status|cancel`（小球内
+> 设备码登录：发起跳转官方登录页 → 轮询授权 → 自动保存并激活）。
+
 ## 命令一览
 
 | 命令 | 作用 |
 |---|---|
-| `npm run login` | 独立登录（设备码流程，浏览器授权一次，凭据存 `codely-creds.json`） |
+| `npm run login` | 独立登录（设备码流程，浏览器授权一次，凭据存 `codely-creds.json`，同时登记到账号注册表） |
+| `npm run account -- list` | 列出已登录账号（`*` 标记当前） |
+| `npm run account -- switch <name>` | 切换当前账号（换凭据+密钥，代理运行中自动重探模型） |
+| `npm run account -- login [name]` | 设备码登录一个新账号并设为当前 |
+| `npm run account -- remove <name>` | 删除账号（删当前时自动切到剩余第一个） |
+| `npm run account -- show` | 查看当前账号详情 |
 | `npm run models` | 查询当前账号可用的模型列表 |
 | `npm run backend-probe` | 探测 `codely-*` 别名背后的真实后端模型（读网关透传的 `resp.model`） |
 | `npm run quota` | 终端直接查看积分余额（每日赠送/充值余额/套餐窗口/月度统计，`--force` 强制刷新） |
@@ -183,8 +230,9 @@ setup 支持的参数：`--port N`（代理端口）、`--set-default`（设为 
 |---|---|
 | `~/.dsh/settings.yaml` | `llm-pi-ai.providers` 下新增 `codely` 条目（指向 `http://127.0.0.1:8790/v1`）；已有 provider（如 opencode-go）不受影响 |
 | `~/.dsh/.credentials.yaml` | 新增 `CODELY_API_KEY` |
-| 本目录 `codely-creds.json` | `npm run login` 保存的登录凭据（独立于官方 CLI，已 gitignore） |
-| 本目录 `key.cache` / `session.cache` | 代理运行时状态（已 gitignore） |
+| 本目录 `codely-creds.json` | `npm run login` 保存的「当前激活账号」凭据（独立于官方 CLI，已 gitignore） |
+| 本目录 `accounts/` | 多账号注册表（`index.json` + 各账号凭据，已 gitignore） |
+| 本目录 `key.cache` / `session.cache` | 代理运行时状态（已 gitignore；切换账号时自动更换） |
 | `~/.dsh/profiles/web/package.json` | 新增 `@dsh-external/dsh-codely-quota`（`link:` 依赖 + bundles 条目），dsh 启动自动装配额度圈（`npm run uninstall` 会移除） |
 
 注意：setup 会用 YAML 库重写 dsh 的两个配置文件，**原文件中的注释会丢失**，因此修改前会先做备份。
@@ -199,7 +247,7 @@ setup 支持的参数：`--port N`（代理端口）、`--set-default`（设为 
 | 代理日志反复 `上游返回 401` | 密钥失效且自动刷新失败 → 重新 `npm run login`，再 `npm run setup` |
 | 代理日志 `模型被团队权限拒绝`，或 dsh 报 `team not allowed to access model` | 上游团队白名单不含该模型（如 `GLM-5.2` / `glm-5.2-max` 等，白名单仅 `codely-*` 别名）→ 在 dsh 改用列表内的模型：`codely-core` / `codely-flash` / `codely-air` / `codely-basic` / `codely-vl`；换 key/换团队无效（密钥幂等、白名单随团队固定），重跑 `npm run setup` 也只会同步白名单内模型 |
 | 想确认代理状态 | `curl http://127.0.0.1:8790/healthz` |
-| 换了 Codely 账号/组织 | 重新 `npm run login` + `npm run setup` |
+| 换了 Codely 账号/组织 | `npm run account -- list` 看账号 → `npm run account -- switch <name>` 切过去（新账号需先 `npm run account -- login <name>` 登录）；小球里也能一键切换 |
 | 登录时浏览器没自动打开 | 手动复制终端打印的 Verification URL 到浏览器打开 |
 
 ## 卸载
@@ -218,15 +266,18 @@ npm run uninstall     # 恢复 dsh 配置备份
 
 ```
 codely-dsh-bridge/
-├── login.js           # 独立登录（设备码流程，免装 codely CLI）
+├── login.js           # 独立登录（设备码流程，免装 codely CLI；登录后登记到账号注册表）
+├── account.js         # 多账号管理 CLI（list / switch / login / remove / show）
 ├── codely-auth.js     # 凭据管理（本地 creds 优先，官方 CLI 回退，自动刷新）
-├── codely-proxy.js    # 本地代理（核心；含 /quota 积分端点）
-├── codely-quota.js    # 积分余额查询（summary/plan/key-info，15s 缓存；可 CLI：npm run quota）
+├── codely-accounts.js # 多账号注册表（accounts/ 读写、切换、凭据指纹）
+├── codely-proxy.js    # 本地代理（核心；含 /quota、/accounts、/account/switch 端点）
+├── codely-quota.js    # 积分余额查询（summary/plan/key-info，按账号指纹 15s 缓存；可 CLI：npm run quota）
 ├── setup.js           # 安装脚本（幂等）
 ├── uninstall.js       # 回滚脚本
 ├── start.cmd          # Windows 一键启动
+├── accounts/          # 多账号注册表（index.json + 各账号凭据，运行时生成，gitignored）
 ├── plugins/
-│   └── dsh-codely-quota/   # 附带 dsh 插件：积分额度悬浮圈（点击展开详情）+ codely_quota 工具
+│   └── dsh-codely-quota/   # 附带 dsh 插件：积分额度悬浮圈（点击展开详情 + 账号切换下拉）+ codely_quota 工具
 ├── test/smoke.js      # 冒烟测试
 └── docs/PROTOCOL.md   # 网关协议逆向笔记（维护必读）
 ```

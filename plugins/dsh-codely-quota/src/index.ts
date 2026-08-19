@@ -45,8 +45,8 @@ const API_PREFIX = '/' + name + '/api'
 /** host 侧积分快照缓存（内存级，按 TTL 老化；force=1 可穿透） */
 let cache: { ts: number; value: any } = { ts: 0, value: null }
 
-async function fetchWithTimeout(url: string, ms: number): Promise<Response> {
-  return fetch(url, { signal: AbortSignal.timeout(ms) })
+async function fetchWithTimeout(url: string, ms: number, extra: RequestInit = {}): Promise<Response> {
+  return fetch(url, { ...extra, signal: AbortSignal.timeout(ms) })
 }
 
 /**
@@ -80,11 +80,13 @@ const pt = (v: unknown): string => String(v ?? '').slice(0, 19).replace('T', ' '
 function summarize(data: any): string {
   if (!data) return '（无数据）'
   const plan = data.plan?.plan_type ?? 'unknown'
+  const acc = data.account
+  const accLabel = acc ? (acc.teamName && acc.teamName !== acc.name ? `${acc.teamName}（${acc.name}）` : acc.name) : '?'
   const da = data.dailyAllowance
   const bill = data.billing
   const cp = data.codingPlan
   const lines: string[] = []
-  lines.push(`Codely 积分额度（${plan === 'free' ? '免费版' : '套餐 ' + plan}，更新于 ${pt(data.fetchedAt)}）`)
+  lines.push(`Codely 账号 ${accLabel} 积分额度（${plan === 'free' ? '免费版' : '套餐 ' + plan}，更新于 ${pt(data.fetchedAt)}）`)
   if (da?.quota_points) {
     lines.push(`每日赠送：剩余 ${L(da.remaining_points)} / ${L(da.quota_points)}，已用 ${L(da.used_points)}（${da.quota_timezone || 'Asia/Shanghai'} 日窗口，重置于 ${pt(da.period_end_at)}）`)
   }
@@ -108,11 +110,64 @@ function summarize(data: any): string {
   return lines.join('\n')
 }
 
-async function proxyHealth(cfg: Config): Promise<boolean> {
+async function proxyHealth(cfg: Config): Promise<{ up: boolean; account: any }> {
   try {
     const r = await fetchWithTimeout(`${cfg.proxyBaseURL.replace(/\/+$/, '')}/healthz`, 3000)
-    return r.ok
-  } catch { return false }
+    const j = await r.json().catch(() => null)
+    return { up: r.ok, account: j?.account ?? null }
+  } catch { return { up: false, account: null } }
+}
+
+/** 账号列表（经本地代理 /accounts，loopback-only） */
+async function fetchAccounts(cfg: Config): Promise<any> {
+  const base = cfg.proxyBaseURL.replace(/\/+$/, '')
+  const r = await fetchWithTimeout(`${base}/accounts`, 6000)
+  const j: any = await r.json().catch(() => null)
+  if (!r.ok || !j?.ok) {
+    throw new Error(`获取账号列表失败（HTTP ${r.status}）：${j?.error || r.statusText || '未知'}`)
+  }
+  return j
+}
+
+/** 切换当前账号（经本地代理 /account/switch，名从 query 带出） */
+async function proxySwitchAccount(cfg: Config, name: string): Promise<any> {
+  const base = cfg.proxyBaseURL.replace(/\/+$/, '')
+  const r = await fetchWithTimeout(`${base}/account/switch?name=${encodeURIComponent(name)}`, 20000, { method: 'POST' })
+  const j: any = await r.json().catch(() => null)
+  if (!r.ok || !j?.ok) {
+    throw new Error(`切换账号失败（HTTP ${r.status}）：${j?.error || r.statusText || '未知'}`)
+  }
+  return j
+}
+
+/** 小球内设备码登录：发起/轮询/取消（经本地代理） */
+async function proxyLoginStart(cfg: Config, name: string | null): Promise<any> {
+  const base = cfg.proxyBaseURL.replace(/\/+$/, '')
+  const q = name ? '?name=' + encodeURIComponent(name) : ''
+  const r = await fetchWithTimeout(`${base}/account/login/start${q}`, 20000, { method: 'POST' })
+  const j: any = await r.json().catch(() => null)
+  if (!r.ok || !j?.ok) {
+    throw new Error(`发起登录失败（HTTP ${r.status}）：${j?.error || r.statusText || '未知'}`)
+  }
+  return j
+}
+async function proxyLoginStatus(cfg: Config): Promise<any> {
+  const base = cfg.proxyBaseURL.replace(/\/+$/, '')
+  const r = await fetchWithTimeout(`${base}/account/login/status`, 10000)
+  const j: any = await r.json().catch(() => null)
+  if (!r.ok || !j?.ok) {
+    throw new Error(`查询登录状态失败（HTTP ${r.status}）：${j?.error || r.statusText || '未知'}`)
+  }
+  return j
+}
+async function proxyLoginCancel(cfg: Config): Promise<any> {
+  const base = cfg.proxyBaseURL.replace(/\/+$/, '')
+  const r = await fetchWithTimeout(`${base}/account/login/cancel`, 6000, { method: 'POST' })
+  const j: any = await r.json().catch(() => null)
+  if (!r.ok || !j?.ok) {
+    throw new Error(`取消失败（HTTP ${r.status}）：${j?.error || r.statusText || '未知'}`)
+  }
+  return j
 }
 
 export function apply(ctx: AppContext, config: Config): void {
@@ -129,8 +184,25 @@ export function apply(ctx: AppContext, config: Config): void {
           const data = await fetchQuotaSnapshot(config, force)
           json(res, 200, { ok: true, fetchedAt: data.fetchedAt, data })
         } else if (action === 'health') {
-          const up = await proxyHealth(config)
-          json(res, 200, { ok: up, proxyUp: up, proxyBaseURL: config.proxyBaseURL, refreshMs: config.refreshMs })
+          const h = await proxyHealth(config)
+          json(res, 200, { ok: true, proxyUp: h.up, account: h.account, proxyBaseURL: config.proxyBaseURL, refreshMs: config.refreshMs })
+        } else if (action === 'accounts') {
+          const j = await fetchAccounts(config)
+          json(res, 200, { ok: true, current: j.current, account: j.account, list: j.list })
+        } else if (action === 'account/switch') {
+          const name = u.searchParams.get('name')
+          if (!name) throw new Error('缺少参数 name（要切换到的账号名）')
+          const j = await proxySwitchAccount(config, name)
+          json(res, 200, { ok: true, account: j.account })
+        } else if (action === 'account/login/start') {
+          const j = await proxyLoginStart(config, u.searchParams.get('name'))
+          json(res, 200, { ok: true, login: j.login })
+        } else if (action === 'account/login/status') {
+          const j = await proxyLoginStatus(config)
+          json(res, 200, { ok: true, ...j })
+        } else if (action === 'account/login/cancel') {
+          const j = await proxyLoginCancel(config)
+          json(res, 200, { ok: true, ...j })
         } else {
           json(res, 404, { ok: false, error: 'unknown action: ' + action })
         }

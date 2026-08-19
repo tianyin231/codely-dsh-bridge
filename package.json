@@ -10,6 +10,7 @@
   },
   "scripts": {
     "login": "node login.js",
+    "account": "node account.js",
     "models": "node models.js",
     "backend-probe": "node backend-probe.js",
     "quota": "node codely-quota.js",

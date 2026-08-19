@@ -13,6 +13,33 @@ dsh 插件（hybrid 形态）：在 dsh web 里放一个**右下角悬浮小圆�
 - **🎨 主题自适应**：跟随 dsh 全局主题（`body[data-ds-dark-theme]`）——浅色＝白底黑字，深色＝深底浅字；
   切主题由 MutationObserver 实时换肤，无需刷新。所有配色收敛为 `--cqw-*` 自定义属性，想微调改 `THEME` 常量即可。
 
+## 多账号切换（小球内一键丝滑切换）
+
+展开浮层顶部有一条**账号行**：显示当前账号名，多账号时出现**下拉选择器**。切换即「丝滑」生效：
+换凭据 + 换密钥 + 清配额缓存 + 自动重探模型映射（`~/.dsh/settings.yaml` 按新账号权限刷新），**全程无需重启任何进程**。
+
+**添加新账号**：点账号行右侧的 **「+」** —— 直接发起设备码登录并给出**验证链接（可一键复制）+ 用户码**。
+授权完成后自动保存凭据并切换过去，圆环平滑过渡到新账号额度。
+
+> ⚠️ **授权跟随浏览器会话**：官方授权页（Unity ID）会把设备码授权给**打开链接的那个浏览器会话**，
+> 没有「切换账号」按钮。**不要在主浏览器直接打开**——已登录的会话会瞬间授权当前账号并消耗设备码
+> （无痕里再打开会提示 "no longer pending"）。正确姿势：**复制链接 → 无痕窗口/另一浏览器打开 → 登录
+> 另一个 Unity 账号 → 授权**。若误在主浏览器打开授权了当前账号，面板会明确提示而不是假装成功；
+> 已保存的不同账号之间（小球下拉 / CLI `switch`）随时丝滑切换。
+
+```
+小球「+」  →  插件 host POST /api/account/login/start → 本地代理 → 发起设备码（不自动弹窗）
+             （复制链接到无痕/另一浏览器授权 → 轮询 /status → 同账号识别/自动保存 accounts/ + 激活 + 重探模型）
+```
+
+```
+小球(下拉选择)  →  插件 host POST /api/account/switch  →  本地代理 POST /account/switch
+                    →  换 accounts/<name>.json → codely-creds.json + 换 sk- 密钥 + 清缓存 + 重探模型
+```
+
+- 账号由 `codely-dsh-bridge` 的多账号注册表管理：`npm run account -- list / switch <name> / login [name] / remove <name>`。
+- 页面开着、别人用 CLI 切了账号：小球会在 15s 健康轮询 / 每次额度刷新时自动跟上当前账号显示。
+
 ## 数据源
 
 不直连官网鉴权，而是走 **codely-dsh-bridge 本地代理**（同一份登录态）：
@@ -75,8 +102,13 @@ dev_uninject_plugin {"match": "dsh-codely-quota"}
 
 | 路径 | 说明 |
 |---|---|
-| `GET /quota` | 积分快照 JSON（`?force=1` 穿透缓存） |
-| `GET /health` | `{proxyUp, proxyBaseURL, refreshMs}` 连通性/配置 |
+| `GET /quota` | 积分快照 JSON（`?force=1` 穿透缓存），含 `data.account` 当前账号信息 |
+| `GET /health` | `{proxyUp, proxyBaseURL, refreshMs, account}` 连通性/配置 |
+| `GET /accounts` | 已登录账号列表（`{current, account, list[]}`） |
+| `POST /account/switch?name=<账号>` | 切换到指定账号（同 CLI `npm run account -- switch`，免重启） |
+| `POST /account/login/start` | 发起设备码登录（返回验证链接+用户码），自动打开官方登录页 |
+| `GET /account/login/status` | 轮询授权状态；`authorized` 时已自动保存账号并激活 |
+| `POST /account/login/cancel` | 取消进行中的登录 |
 
 ## 风险提示
 

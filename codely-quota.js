@@ -19,10 +19,12 @@
 'use strict';
 
 const auth = require('./codely-auth');
+const accounts = require('./codely-accounts');
 
 const CACHE_TTL_MS = 15 * 1000; // 15s 缓存，避免高频轮询打爆官网
 
-let cache = { ts: 0, data: null };
+// 缓存按「账号指纹」隔离：换账号（切到别的 codely-creds.json 身份）自动失效，无需手动清
+let cache = { ts: 0, data: null, fp: null };
 
 async function fetchJson(url, headers) {
   const res = await fetch(url, { headers, redirect: 'follow' });
@@ -62,9 +64,10 @@ async function fetchKeyInfo(apiKey) {
  */
 async function fetchQuotaSnapshot({ force = false } = {}) {
   const now = Date.now();
-  if (!force && cache.data && now - cache.ts < CACHE_TTL_MS) return cache.data;
-
   const creds = await auth.getAccessToken(); // 失败会抛「请先 npm run login」
+  const fp = accounts.credFingerprint(creds);
+  if (!force && cache.data && cache.fp === fp && now - cache.ts < CACHE_TTL_MS) return cache.data;
+
   const base = auth.BASE;
   const headers = { Authorization: `Bearer ${creds.access_token}`, Accept: 'application/json' };
 
@@ -96,6 +99,7 @@ async function fetchQuotaSnapshot({ force = false } = {}) {
 
   const snapshot = {
     fetchedAt: new Date().toISOString(),
+    account: accounts.getCurrentMeta(), // {name, teamName, userId, ...}（多账号切换后显示当前何者）
     organization: summary?.organization ?? null,
     plan: plan ? {
       plan_type: plan.plan_type ?? 'unknown',
@@ -113,7 +117,7 @@ async function fetchQuotaSnapshot({ force = false } = {}) {
     lifetime: summary?.lifetime ?? null,
     rateLimit,
   };
-  cache = { ts: Date.now(), data: snapshot };
+  cache = { ts: Date.now(), data: snapshot, fp };
   return snapshot;
 }
 
@@ -126,7 +130,9 @@ async function main() {
   const snap = await fetchQuotaSnapshot({ force });
   const pct = (u, q) => (Number(q) > 0 ? ((Number(u) / Number(q)) * 100).toFixed(1) : '-');
   const plan = snap.plan?.plan_type === 'free' ? '免费版' : `套餐 ${snap.plan?.plan_type || '?'}`;
-  console.log(`Codely 积分额度（${plan}，更新于 ${snap.fetchedAt}）`);
+  const acc = snap.account;
+  const accLabel = acc ? `@${acc.name}` + (acc.teamName && acc.teamName !== acc.name ? `（${acc.teamName}）` : '') : '';
+  console.log(`Codely 账号 ${accLabel} · 积分额度（${plan}，更新于 ${snap.fetchedAt}）`);
   const da = snap.dailyAllowance;
   if (da?.quota_points) {
     console.log(`每日赠送  剩余 ${Number(da.remaining_points).toFixed(2)} / ${Number(da.quota_points).toFixed(0)}（已用 ${Number(da.used_points).toFixed(2)}，${pct(da.used_points, da.quota_points)}%，窗口 ${da.period_start_at} ~ ${da.period_end_at}）`);

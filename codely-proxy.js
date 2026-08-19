@@ -18,6 +18,7 @@ const path = require('path');
 const crypto = require('crypto');
 const auth = require('./codely-auth');
 const quota = require('./codely-quota');
+const accounts = require('./codely-accounts');
 
 /* ─── 命令行参数 ─── */
 function argValue(name, env, def) {
@@ -37,7 +38,10 @@ if (argFlag('--help') || argFlag('-h')) {
 
 端点:
   /healthz   健康检查
-  /quota     积分余额快照（每日赠送/充值余额/套餐窗口/月度统计，15s 缓存；?force=1 强制刷新）`);
+  /quota     积分余额快照（每日赠送/充值余额/套餐窗口/月度统计，15s 缓存；?force=1 强制刷新）
+  /accounts  已登录账号列表（多账号）
+  /account/switch?name=<账号名>  切换到指定账号（换凭据+密钥、清配额缓存、重探模型）
+  /account/login/start|status|cancel  小球内设备码登录（发起/轮询/取消，授权后自动登记并激活）`);
   process.exit(0);
 }
 
@@ -197,20 +201,30 @@ async function handle(req, res, body) {
   }
 }
 
+/* ─── 工具 ─── */
+/** 仅允许 loopback Host 访问（127.0.0.1/localhost/::1），防 DNS rebinding 被网页读取。
+ *  命中则返回 false 并已回写 403；放行返回 true。 */
+function hostAllowed(req, res) {
+  const host = String(req.headers.host || '');
+  if (/^(127\.0\.0\.1|localhost|::1)(:\d+)?$/i.test(host)) return true;
+  res.writeHead(403, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ ok: false, error: 'forbidden host' }));
+  return false;
+}
+
 const server = http.createServer((req, res) => {
   if (req.url === '/healthz') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ ok: true, upstream: UPSTREAM_HOST, keyCached: !!loadCachedKey() }));
+    return res.end(JSON.stringify({
+      ok: true,
+      upstream: UPSTREAM_HOST,
+      keyCached: !!loadCachedKey(),
+      account: accounts.getCurrentMeta(),
+    }));
   }
   // 积分余额快照（供 dsh-codely-quota 插件 / 人工 curl 查询）
-  // 仅允许 loopback Host 访问（127.0.0.1/localhost 端口），防 DNS rebinding 被网页读取
   if (req.url === '/quota' || req.url.startsWith('/quota?')) {
-    const host = String(req.headers.host || '');
-    const okHost = /^(127\.0\.0\.1|localhost|::1)(:\d+)?$/i.test(host);
-    if (!okHost) {
-      res.writeHead(403, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ ok: false, error: 'forbidden host' }));
-    }
+    if (!hostAllowed(req, res)) return;
     const force = new URL(req.url, 'http://x').searchParams.get('force') === '1';
     const started = Date.now();
     quota.fetchQuotaSnapshot({ force })
@@ -226,6 +240,81 @@ const server = http.createServer((req, res) => {
       });
     return;
   }
+  // 已登录账号列表（多账号切换；供小球/CLI 展示）
+  if (req.url === '/accounts' || req.url.startsWith('/accounts?')) {
+    if (!hostAllowed(req, res)) return;
+    const list = accounts.listAccounts();
+    return res.end(JSON.stringify({ ok: true, current: accounts.getCurrentName(), account: accounts.getCurrentMeta(), list }));
+  }
+  // 切换当前账号：换凭据+清密钥缓存+清配额缓存+重探模型（无重启）
+  if (req.url === '/account/switch' || req.url.startsWith('/account/switch?')) {
+    if (!hostAllowed(req, res)) return;
+    const buf = [];
+    req.on('data', (c) => buf.push(c));
+    req.on('end', async () => {
+      let name = new URL(req.url, 'http://x').searchParams.get('name');
+      if (!name && req.method === 'POST') {
+        try { name = JSON.parse(Buffer.concat(buf).toString('utf8') || '{}').name; } catch { /* 忽略非法 body */ }
+      }
+      const started = Date.now();
+      try {
+        const acct = await accounts.activateAccount(name);
+        log('account', `切换账号 -> [${acct.name}] (${Date.now() - started}ms, 密钥${acct.key ? '已预取' : '下次请求时取'})`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, account: { name: acct.name, teamName: acct.teamName, userId: acct.userId } }));
+        reportBackends(); // 异步重探/同步模型列表（不同账号可用模型可能不同）
+      } catch (e) {
+        log('account', `切换账号失败: ${e.message}`);
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+    });
+    return;
+  }
+  // 小球内设备码登录：发起（返回验证链接+用户码）→ 轮询状态 → 授权后自动登记+激活
+  if (req.url === '/account/login/start' || req.url.startsWith('/account/login/start?')) {
+    if (!hostAllowed(req, res)) return;
+    const buf = [];
+    req.on('data', (c) => buf.push(c));
+    req.on('end', async () => {
+      let name = new URL(req.url, 'http://x').searchParams.get('name');
+      if (!name && req.method === 'POST') {
+        try { name = JSON.parse(Buffer.concat(buf).toString('utf8') || '{}').name; } catch { /* 忽略非法 body */ }
+      }
+      try {
+        const started = Date.now();
+        const login = await accounts.startLogin({ name });
+        log('account', `设备码登录发起 -> user_code=${login.user_code} (${Date.now() - started}ms${login.name ? `, name=${login.name}` : ''})`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, login }));
+      } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      }
+    });
+    return;
+  }
+  if (req.url === '/account/login/status' || req.url.startsWith('/account/login/status?')) {
+    if (!hostAllowed(req, res)) return;
+    accounts.pollLogin()
+      .then((r) => {
+        if (r.status === 'authorized') log('account', `设备码登录成功 -> [${r.account.name}]`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, ...r }));
+      })
+      .catch((e) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      });
+    return;
+  }
+  if (req.url === '/account/login/cancel' || req.url.startsWith('/account/login/cancel?')) {
+    if (!hostAllowed(req, res)) return;
+    accounts.cancelLogin();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, status: 'cancelled' }));
+    return;
+  }
   const chunks = [];
   req.on('data', (c) => chunks.push(c));
   req.on('end', () => handle(req, res, Buffer.concat(chunks)));
@@ -237,8 +326,11 @@ server.listen(PORT, BIND, () => {
   log('proxy', `上游   https://${UPSTREAM_HOST}/v1`);
   const creds = auth.loadCreds();
   log('proxy', `凭据: ${creds ? creds.source : '未找到（npm run login 或用官方 CLI 登录）'}`);
+  const acc = accounts.getCurrentMeta();
+  log('proxy', `当前账号: ${acc ? '[' + acc.name + ']' + (acc.teamName && acc.teamName !== acc.name ? `（${acc.teamName}）` : '') : '（未登录）'}`);
   const k = loadCachedKey();
   log('proxy', `密钥缓存: ${k ? k.slice(0, 6) + '...' : '无（首个请求时自动获取）'}`);
+  log('proxy', `账号切换: GET /accounts 查看，POST /account/switch?name=<账号> 切换，POST /account/login/start 添加（不重启）`);
   reportBackends();
 });
 

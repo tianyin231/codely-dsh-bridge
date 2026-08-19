@@ -158,6 +158,34 @@ function buildPet(): () => void {
     `<span data-cq="age" style="font-size:10px;color:var(--cqw-muted)"></span>` +
     `<button data-cq="refresh" style="background:var(--cqw-btn);color:var(--cqw-fg);border:1px solid var(--cqw-btnBorder);border-radius:6px;padding:1px 8px;font-size:11px;cursor:pointer">刷新</button>` +
     `</div>` +
+    `<div data-cq="accrow" style="display:none;align-items:center;gap:6px;margin-top:8px;padding:5px 8px;border:1px solid var(--cqw-cardBorder);border-radius:8px;background:var(--cqw-card)">` +
+    `<span style="font-size:11px;color:var(--cqw-muted)">账号</span>` +
+    `<span data-cq="accname" style="font-size:12px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></span>` +
+    `<select data-cq="accsel" style="display:none;max-width:130px;background:var(--cqw-btn);color:var(--cqw-fg);border:1px solid var(--cqw-btnBorder);border-radius:6px;font-size:11px;padding:1px 4px"></select>` +
+    `<button data-cq="accadd" title="添加账号" style="flex:none;background:var(--cqw-btn);color:var(--cqw-fg);border:1px solid var(--cqw-btnBorder);border-radius:6px;padding:0 8px;font-size:13px;line-height:18px;cursor:pointer">+</button>` +
+    `</div>` +
+    `<div data-cq="addbox" style="display:none;margin-top:8px;border:1px solid var(--cqw-cardBorder);border-radius:10px;padding:8px 10px;background:var(--cqw-card)">` +
+    `<div style="display:flex;align-items:center;gap:6px">` +
+    `<span style="font-size:11px;color:var(--cqw-muted)">登录新账号</span>` +
+    `<span style="flex:1"></span>` +
+    `<button data-cq="loginCancel" style="background:var(--cqw-btn);color:var(--cqw-fg);border:1px solid var(--cqw-btnBorder);border-radius:6px;padding:1px 8px;font-size:11px;cursor:pointer">关闭</button>` +
+    `</div>` +
+    `<div data-cq="loginStep" style="display:none;margin-top:6px">` +
+    `<div style="font-size:11px;color:var(--cqw-muted)">复制链接到【无痕窗口/另一浏览器】打开并登录另一 Unity 账号授权（主浏览器直接打开=授权当前账号）：</div>` +
+    `<div style="display:flex;gap:6px;margin-top:4px">` +
+    `<input data-cq="loginUrl" readonly style="flex:1;min-width:0;background:var(--cqw-btn);color:var(--cqw-fg);border:1px solid var(--cqw-btnBorder);border-radius:6px;font-size:10px;padding:3px 5px" />` +
+    `<button data-cq="loginCopy" style="flex:none;background:var(--cqw-btn);color:var(--cqw-fg);border:1px solid var(--cqw-btnBorder);border-radius:6px;padding:1px 8px;font-size:11px;cursor:pointer">复制</button>` +
+    `<button data-cq="loginOpen" style="flex:none;background:var(--cqw-btn);color:var(--cqw-fg);border:1px solid var(--cqw-btnBorder);border-radius:6px;padding:1px 8px;font-size:11px;cursor:pointer">当前浏览器打开</button>` +
+    `</div>` +
+    `<div style="margin-top:6px;display:flex;align-items:center;gap:8px">` +
+    `<span style="font-size:11px;color:var(--cqw-muted)">用户码</span>` +
+    `<b data-cq="loginCode" style="font-size:20px;letter-spacing:2px"></b>` +
+    `<span style="flex:1"></span>` +
+    `<span data-cq="loginProgress" style="font-size:11px;color:var(--cqw-muted)"></span>` +
+    `</div>` +
+    `</div>` +
+    `<div data-cq="loginMsg" style="margin-top:6px;font-size:11px;color:var(--cqw-muted)"></div>` +
+    `</div>` +
     `<div data-cq="banner" style="display:none;margin-top:8px;border:1px solid var(--cqw-bannerBorder);background:var(--cqw-bannerBg);border-radius:8px;padding:6px 8px;font-size:11px;color:var(--cqw-bannerFg)"></div>` +
     `<div data-cq="body" style="display:grid;gap:8px;margin-top:10px"></div>` +
     `<div data-cq="foot" style="margin-top:10px;font-size:10px;color:var(--cqw-muted)"></div>`
@@ -182,6 +210,119 @@ function buildPet(): () => void {
   const ageEl = wrapper.querySelector<HTMLElement>('[data-cq="age"]')!
   const planEl = wrapper.querySelector<HTMLElement>('[data-cq="plan"]')!
   const refreshBtn = wrapper.querySelector<HTMLButtonElement>('[data-cq="refresh"]')!
+  const accRow = wrapper.querySelector<HTMLElement>('[data-cq="accrow"]')!
+  const accName = wrapper.querySelector<HTMLElement>('[data-cq="accname"]')!
+  const accSel = wrapper.querySelector<HTMLSelectElement>('[data-cq="accsel"]')!
+  const accAdd = wrapper.querySelector<HTMLButtonElement>('[data-cq="accadd"]')!
+  const addBox = wrapper.querySelector<HTMLElement>('[data-cq="addbox"]')!
+  const loginCancelBtn = wrapper.querySelector<HTMLButtonElement>('[data-cq="loginCancel"]')!
+  const loginStep = wrapper.querySelector<HTMLElement>('[data-cq="loginStep"]')!
+  const loginUrl = wrapper.querySelector<HTMLInputElement>('[data-cq="loginUrl"]')!
+  const loginCopy = wrapper.querySelector<HTMLButtonElement>('[data-cq="loginCopy"]')!
+  const loginOpen = wrapper.querySelector<HTMLButtonElement>('[data-cq="loginOpen"]')!
+  const loginCode = wrapper.querySelector<HTMLElement>('[data-cq="loginCode"]')!
+  const loginProgress = wrapper.querySelector<HTMLElement>('[data-cq="loginProgress"]')!
+  const loginMsg = wrapper.querySelector<HTMLElement>('[data-cq="loginMsg"]')!
+
+  /* ── 账号切换状态 ── */
+  let accountList: any[] = []       // [{name, teamName, isCurrent, ...}]
+  let currentAccount: any = null    // 当前账号摘要（来自 /api/health 或 quota 内的 account）
+  let switching = false
+  /* ── 添加账号（设备码登录）状态 ── */
+  let loginActive = false
+  let loginTimer: number | null = null
+
+  /* ── 添加账号（小球内设备码登录：点「+」→ 发起并给出验证链接 → 复制到无痕/另一浏览器授权 → 自动保存+切换） ── */
+  function stopLogin(callCancel: boolean): void {
+    if (loginTimer) { clearInterval(loginTimer); loginTimer = null }
+    loginActive = false
+    if (callCancel) {
+      try { void fetch(API + '/account/login/cancel', { method: 'POST', cache: 'no-store' }) } catch { /* 忽略 */ }
+    }
+  }
+  /** 「+」点击：进行中则取消收起；否则展开并（重新）发起登录 */
+  function toggleAddBox(): void {
+    if (loginActive) { stopLogin(true); addBox.style.display = 'none'; return }
+    addBox.style.display = 'block'
+    loginStep.style.display = 'none'
+    loginProgress.textContent = ''
+    loginMsg.textContent = '添加新账号：① 点「复制」→ ② 在无痕窗口/另一浏览器粘贴打开 → ③ 登录另一个 Unity 账号并授权，完成后自动保存并切换。'
+    void startLoginFlow()
+  }
+  function startLoginFlow(): Promise<void> {
+    if (loginActive) return Promise.resolve()
+    return fetch(API + '/account/login/start', { method: 'POST', cache: 'no-store' })
+      .then((r) => r.json().catch(() => null))
+      .then((j: any) => {
+        if (!j || !j.ok) throw new Error((j && j.error) || '发起登录失败')
+        loginActive = true
+        loginStep.style.display = 'block'
+        loginUrl.value = j.login.verification_uri_complete
+        loginCode.textContent = j.login.user_code
+        loginProgress.textContent = '等待授权…'
+        loginMsg.textContent = '请复制链接到【无痕窗口/另一浏览器】打开，登录另一 Unity 账号后授权（主浏览器直接打开=授权当前账号）。'
+        loginTimer = window.setInterval(() => { void pollLoginFlow() }, 3000)
+      })
+      .catch((e: any) => {
+        loginMsg.textContent = '发起登录失败：' + String((e && e.message) || e) + '（可再点「+」重试）'
+      })
+  }
+  function pollLoginFlow(): Promise<void> {
+    if (!loginActive) return Promise.resolve()
+    return fetch(API + '/account/login/status', { cache: 'no-store' })
+      .then((r) => r.json().catch(() => null))
+      .then((j: any) => {
+        if (!j || !j.ok) throw new Error((j && j.error) || '查询失败')
+        if (j.status === 'pending') { loginProgress.textContent = '等待授权…'; return }
+        if (j.status === 'authorized') {
+          const a = j.account || {}
+          // 同账号识别：服务端 same 标记 或 客户端直接比对 userId（浏览器没换会话）
+          const sameAccount = !!(j.same || (currentAccount && a.userId && String(currentAccount.userId) === String(a.userId)))
+          if (sameAccount) {
+            // 授权的是当前账号（浏览器没换会话）：不重复添加，明确告知
+            stopLogin(false)
+            loginProgress.textContent = ''
+            loginMsg.textContent = '刚才授权的是当前账号 [' + (a.name || currentAccount?.name || '?') + ']（当前浏览器直接打开会自动授权当前账号）。要添加其他账号：复制链接到无痕窗口/另一浏览器打开，登录另一 Unity 账号授权。可再点「+」重新发起。'
+            return
+          }
+          stopLogin(false)
+          addBox.style.display = 'none'
+          footEl.textContent = '已添加并切换到 [' + (a.name || '?') + ']'
+          return loadAccounts().then(() => refreshQuota(true))
+        }
+        // 终态（idle/denied/expired/error/unknown）：停止轮询并展示信息
+        stopLogin(false)
+        loginStep.style.display = 'block'
+        loginProgress.textContent = ''
+        const msg = j.message || (j.status === 'idle'
+          ? '登录会话已失效（代理可能重启），请重新发起'
+          : (j.status === 'error' ? ('登录失败：' + (j.error || '未知')) : ('状态：' + j.status)))
+        loginMsg.textContent = msg + '（再点「+」可重试）'
+      })
+      .catch(() => {
+        loginProgress.textContent = '查询失败，自动重试…'
+      })
+  }
+  function doCopy(text: string): void {
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        loginMsg.textContent = '链接已复制 ✓'
+      }).catch(() => { fallbackCopy(text) })
+    } else fallbackCopy(text)
+  }
+  function fallbackCopy(text: string): void {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+      loginMsg.textContent = '链接已复制 ✓'
+    } catch { /* 忽略 */ }
+  }
 
   function setRing(p: number, color: string, label: string): void {
     const off = CIRC - (CIRC * Math.max(0, Math.min(100, p))) / 100
@@ -308,6 +449,7 @@ function buildPet(): () => void {
     panel.style.display = 'block'
     renderBody()
     tick()
+    void loadAccounts() // 每次展开刷新账号列表（含外部 CLI 切换）
   }
 
   function refreshQuota(force: boolean): Promise<void> {
@@ -317,6 +459,10 @@ function buildPet(): () => void {
       .then((j: any) => {
         if (!j || !j.ok) throw new Error(j?.error || 'HTTP ?')
         data = j.data
+        if (data?.account && (!currentAccount || currentAccount.name !== data.account.name)) {
+          currentAccount = data.account // 页面开着、别人（CLI）切了账号也能跟上
+          if (panelOpen) renderAccountRow()
+        }
         lastOk = Date.now()
         lastErr = ''
         ringState()
@@ -329,12 +475,82 @@ function buildPet(): () => void {
       .finally(() => { refreshBtn.disabled = false })
   }
 
+  /* ── 账号切换（小球内「丝滑」切换：免重启，切完即刷新额度） ── */
+  function accountLabel(a: any): string {
+    if (!a) return ''
+    const n = a.name || '-'
+    return a.teamName && a.teamName !== n ? `${a.teamName}（${n}）` : n
+  }
+  function renderAccountRow(): void {
+    if (!accRow) return
+    if (!switching) accName.textContent = currentAccount ? accountLabel(currentAccount) : '（未登录）'
+    let opts = ''
+    for (const a of accountList) {
+      opts += `<option value="${esc(a.name)}"${a.isCurrent ? ' selected' : ''}>${esc(accountLabel(a))}</option>`
+    }
+    accSel.innerHTML = opts
+    // 账号行恒显示（下次登录入口）；切换下拉仅多账号时显示
+    accRow.style.display = 'flex'
+    accSel.style.display = accountList.length > 1 ? 'inline-block' : 'none'
+  }
+  function loadAccounts(): Promise<void> {
+    return fetch(API + '/accounts', { cache: 'no-store' })
+      .then((r) => r.json().catch(() => null))
+      .then((j: any) => {
+        if (j && j.ok && Array.isArray(j.list)) {
+          accountList = j.list
+          if (j.account) currentAccount = j.account
+          renderAccountRow()
+        }
+      })
+      .catch(() => { /* 账号列表失败不阻塞主流程 */ })
+  }
+  /** 切换到指定账号：host → 代理换凭据+密钥 → 清配额缓存 → 强制刷新额度（圆环平滑过渡到新账号比例） */
+  function switchTo(name: string): Promise<void> {
+    if (switching || !name) return Promise.resolve()
+    let target: any = null
+    for (const a of accountList) if (a.name === name) { target = a; break }
+    if (!target) return Promise.resolve()
+    switching = true
+    accSel.disabled = true
+    accName.textContent = '切换中…'
+    setRing(14, '#4f8cff', '…')
+    footEl.textContent = '正在切换到 ' + accountLabel(target) + ' …'
+    return fetch(API + '/account/switch?name=' + encodeURIComponent(name), { method: 'POST', cache: 'no-store' })
+      .then((r) => r.json().catch(() => null))
+      .then((j: any) => {
+        if (!j || !j.ok) throw new Error((j && j.error) || '切换失败')
+        currentAccount = j.account || { name }
+        accountList = accountList.map((a) => ({
+          name: a.name, teamName: a.teamName, userId: a.userId, savedAt: a.savedAt, teamId: a.teamId,
+          isCurrent: a.name === ((j.account && j.account.name) || name),
+        }))
+        return refreshQuota(true) // 新账号的额度
+      })
+      .then(() => {
+        if (currentAccount) accName.textContent = accountLabel(currentAccount)
+        renderAccountRow()
+        footEl.textContent = '已切换到 ' + accountLabel(currentAccount) + (data ? ' · ' + pt(data.fetchedAt) + ' 更新' : '')
+      })
+      .catch((e: any) => {
+        lastErr = String((e && e.message) || e)
+        footEl.textContent = '切换失败：' + lastErr
+        if (panelOpen) renderBody()
+      })
+      .finally(() => {
+        switching = false
+        accSel.disabled = false
+        renderAccountRow()
+      })
+  }
+
   function checkHealth(): Promise<void> {
     return fetch(API + '/health', { cache: 'no-store' })
       .then((r) => r.json().catch(() => null))
       .then((j: any) => {
         proxyOk = !!(j && j.proxyUp)
         if (j?.refreshMs) refreshMs = Number(j.refreshMs) || 30000
+        if (j?.account) currentAccount = j.account
       })
       .catch(() => { proxyOk = false })
       .then(() => {
@@ -391,6 +607,15 @@ function buildPet(): () => void {
   pet.addEventListener('pointerup', endDrag)
   pet.addEventListener('pointercancel', endDrag)
   refreshBtn.addEventListener('click', (e) => { e.stopPropagation(); void refreshQuota(true) })
+  accSel.addEventListener('change', () => { void switchTo(accSel.value) })
+  accAdd.addEventListener('click', (e) => { e.stopPropagation(); toggleAddBox() })
+  loginCancelBtn.addEventListener('click', (e) => { e.stopPropagation(); stopLogin(true); addBox.style.display = 'none' })
+  loginCopy.addEventListener('click', (e) => { e.stopPropagation(); doCopy(loginUrl.value) })
+  loginOpen.addEventListener('click', (e) => {
+    e.stopPropagation()
+    try { window.open(loginUrl.value, '_blank') } catch { /* 弹窗被拦则手动复制 */ }
+    loginMsg.textContent = '已尝试打开（当前浏览器打开=授权当前账号；添加其他账号请用无痕窗口）。'
+  })
 
   /* 主题跟随：dsh 切换主题（body[data-ds-dark-theme]）时实时换肤 */
   let themeObserver: MutationObserver | null = null
@@ -408,6 +633,7 @@ function buildPet(): () => void {
     if (disposed) return
     disposed = true
     timers.forEach((t) => clearInterval(t))
+    if (loginTimer) { clearInterval(loginTimer); loginTimer = null }
     themeObserver?.disconnect()
     document.removeEventListener('click', onDocClick, true)
     if (wrapper.parentNode) wrapper.parentNode.removeChild(wrapper)

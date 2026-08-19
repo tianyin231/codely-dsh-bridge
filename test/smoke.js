@@ -26,6 +26,14 @@ async function main() {
     check('模型列表包含 codely-core / codely-flash', ids.includes('codely-core') && ids.includes('codely-flash'));
   } catch { check('GET /v1/models', false); }
 
+  /* 2.1 账号列表（多账号） */
+  try {
+    const r = await fetch(`${BASE}/accounts`);
+    const j = await r.json();
+    check(`GET /accounts -> 200 (${(j.list || []).length} 个账号)`, r.status === 200 && j.ok);
+    check('账号列表含当前账号标记', j.ok && j.current != null);
+  } catch { check('GET /accounts', false); }
+
   /* 3. 一次对话 */
   try {
     const r = await fetch(`${BASE}/v1/chat/completions`, {

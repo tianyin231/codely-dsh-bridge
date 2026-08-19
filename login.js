@@ -11,8 +11,10 @@
  *   5. GET  /api/api-token/cli-api-key     → 换 LiteLLM sk- 密钥
  *
  * 凭据保存在本项目 codely-creds.json（含 gitignore），与 ~/.codely-cli 互不影响。
+ * 同时登记到账号注册表 accounts/（多账号切换见: npm run account -- help）。
  *
- * 用法:  node login.js
+ * 用法:  node login.js [--name <账号名>]
+ *   --name 指定账号名（小写字母/数字/._-，缺省自动取 team_name 或 user_id）
  */
 'use strict';
 
@@ -46,6 +48,20 @@ async function jsonFetch(url, opts = {}) {
 }
 
 async function main() {
+  const nameArg = (() => {
+    const i = process.argv.indexOf('--name');
+    return i >= 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('-') ? process.argv[i + 1] : null;
+  })();
+  const result = await runLogin({ name: nameArg });
+  printResult(result);
+}
+
+/** 设备码登录全流程（login.js CLI 与 npm run account -- login 共用）。
+ * @param {object} [o] { name?: string }
+ * @returns {Promise<{creds, accountName, key, isExistingAccount}>}
+ */
+async function runLogin({ name = null } = {}) {
+  const accounts = require('./codely-accounts');
   console.log('Codely 独立登录（设备码流程）');
   console.log('============================\n');
 
@@ -124,6 +140,12 @@ async function main() {
   };
   fs.writeFileSync(CREDS_FILE, JSON.stringify(creds, null, 2), 'utf8');
 
+  /* 6b. 登记到账号注册表（多账号切换；老账号同名则覆盖更新） */
+  const slug = accounts.slugify(name) || accounts.autoName(creds);
+  const isExistingAccount = !!accounts.loadAccountCreds(slug);
+  accounts.saveAccount(slug, creds, { activate: true });
+  ok(`账号 [${slug}]${isExistingAccount ? '（已存在，凭据已更新）' : '（新账号）'} 已设为当前账号`);
+
   /* 7. 预取 sk- 密钥 */
   process.stdout.write('[5/5] 预取 LiteLLM API 密钥 ... ');
   const keyUrl = new URL(`${BASE}/api/api-token/cli-api-key`);
@@ -132,13 +154,31 @@ async function main() {
     console.log(`跳过（${e.message}，代理启动后会自动重试）`);
     return null;
   });
+  let key = null;
   if (kj?.cli_api_key) {
+    key = kj.cli_api_key;
     fs.writeFileSync(path.join(HERE, 'key.cache'), kj.cli_api_key, 'utf8');
     console.log(`完成 (${kj.cli_api_key.slice(0, 6)}...)`);
   }
 
-  ok(`登录成功，凭据已保存到 ${path.basename(CREDS_FILE)}\n`);
-  console.log('下一步:  npm run setup   注册 dsh provider，然后 npm start 启动代理');
+  return { creds, accountName: slug, isExistingAccount, key };
 }
 
-main().catch((e) => die(e.message));
+/** 登录成功后的终端输出（CLI 入口用） */
+function printResult({ accountName, isExistingAccount, key }) {
+  ok(`登录成功，凭据已保存到 ${path.basename(CREDS_FILE)}\n`);
+  console.log(`当前账号: [${accountName}]${isExistingAccount ? '（已存在，凭据已更新）' : ''}`);
+  console.log(`API 密钥: ${key ? key.slice(0, 6) + '...' : '（代理启动后自动换取）'}`);
+  console.log('\n下一步:');
+  console.log('  1. 启动代理:   double-click start.cmd 或 npm start（端口 8790）');
+  console.log('  2. 运行 dsh:  dsh web → 刷新页面 → 右下角额度圈');
+  console.log('多账号切换:');
+  console.log('  · CLI:   npm run account -- list / switch <name>');
+  console.log('  · 小球:   dsh web 右下角额度圈 → 展开面板 → 顶部账号下拉一键切换');
+}
+
+module.exports = { runLogin };
+
+if (require.main === module) {
+  main().catch((e) => die(e.message));
+}
