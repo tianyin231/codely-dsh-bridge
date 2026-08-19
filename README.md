@@ -69,6 +69,23 @@ npm run setup -- --set-default --model codely-core
 
 > Windows 下也可以直接双击 `start.cmd` 启动代理。
 
+## 正确使用顺序（重要）
+
+```text
+一次性  ──▶  npm run login        # 扫码/浏览器授权，生成 codely-creds.json
+常驻    ──▶  npm start           # 启动代理（监听 127.0.0.1:8790，必须一直开着）
+配置    ──▶  npm run setup       # 注册 codely provider + 装配额度圈插件（幂等）
+使用    ──▶  dsh web             # 打开浏览器后刷新页面 → 右下角出现额度圈
+```
+
+关键注意点：
+
+1. **代理必须先于 dsh 使用**：额度圈和模型请求都走本地代理——代理没开时模型请求失败，额度圈也会整体隐藏（`/api/health` 探测 `proxyUp=false` 即隐藏，代理恢复后自动出现）。
+2. **改过插件源码 / 重跑过 setup 后必须重启 dsh web 并刷新页面**：插件通过 profile bundles 在启动时装配，运行中的 dsh 不会热加载新插件（启动配置快照在启动瞬间固定）。之前遇到过"装好插件却不显示额度圈"的典型原因就是 dsh 没重启。
+3. **setup 在代理未启动时也能跑**：模型列表查询会自动回退直连网关，真实后端探测也会回退直连——写出的模型与上下文窗口信息同样准确，不强制要求先 `npm start`。
+4. **端口必须一致**：`npm start` 与 `npm run setup` 的 `--port` 要一致（默认 8790；换端口用 `npm start -- --port 9000` 和 `npm run setup -- --port 9000`）。
+5. **改过插件源码后**（`plugins/dsh-codely-quota/src/`）：重跑 `npm run build:client` 刷新 `lib/client.js`，再重跑 `npm run setup` 重新装配，最后重启 dsh web。
+
 ## 可用模型
 
 模型列表在 `npm run setup` 时**实时查询** `/v1/models` 自动写入，不写死——不同账号/会员档位可用的模型不同。查询**优先走本地代理**（与 dsh 实际请求同一条路），代理未启动时自动回退直连网关。
@@ -136,13 +153,13 @@ npm run setup -- --set-default --model codely-core
 # 1. 代理先跑起来（悬浮圈数据都从本地代理取；代理不跑时悬浮圈自动隐藏）
 npm start
 
-# 2. 注入插件（当前机器已注入；换机器见下）
-#    dev_inject_plugin {"dir": "…/codely-dsh-bridge/plugins/dsh-codely-quota"}
+# 2. 无需手动注入——**npm run setup 已自动装配插件**（写入 profile 的 dependencies + bundles，见 "附带插件" 章节）
+#    旧版手动方式：dev_inject_plugin {"dir": "…/codely-dsh-bridge/plugins/dsh-codely-quota"}
 
 # 3. 刷新 dsh web 页面 → 右下角出现「额度圈」（点击展开详情）
 ```
 
-> 注入通过 dsh-super-injector（运行时注入，重启后由注入清单自动恢复）。改 `lib/` 代码后重跑注入/重载即可。
+> 装配方式：`npm run setup` 会把插件以 `link:` + bundles 写进 profile（`~/.dsh/profiles/web/package.json`），dsh 启动即自动加载——换机器重跑 setup 即自动完成，无需手工注入。改 `lib/` 代码后刷新页面即可生效（或按插件 README 用 `dev_reload_package` 热重载）。
 > 插件配置：`proxyBaseURL`（默认 `http://127.0.0.1:8790`）、`cacheMs`（host 缓存）、`refreshMs`（悬浮圈自动刷新）。
 
 ## 命令一览
@@ -153,7 +170,7 @@ npm start
 | `npm run models` | 查询当前账号可用的模型列表 |
 | `npm run backend-probe` | 探测 `codely-*` 别名背后的真实后端模型（读网关透传的 `resp.model`） |
 | `npm run quota` | 终端直接查看积分余额（每日赠送/充值余额/套餐窗口/月度统计，`--force` 强制刷新） |
-| `npm run setup` | 安装/更新配置（自动检测可用模型，备份原文件为 `*.bak-codely`） |
+| `npm run setup` | 安装/更新配置（自动检测模型 + 自动装配额度圈插件，修改前备份为 `*.bak-codely`） |
 | `npm start` | 启动代理（默认 `127.0.0.1:8790`，`--port N` 可改端口，需与 setup 的 `--port` 一致） |
 | `npm test` | 冒烟测试（healthz / models / 一次对话） |
 | `npm run uninstall` | 回滚 dsh 配置（优先恢复备份） |
@@ -168,6 +185,7 @@ setup 支持的参数：`--port N`（代理端口）、`--set-default`（设为 
 | `~/.dsh/.credentials.yaml` | 新增 `CODELY_API_KEY` |
 | 本目录 `codely-creds.json` | `npm run login` 保存的登录凭据（独立于官方 CLI，已 gitignore） |
 | 本目录 `key.cache` / `session.cache` | 代理运行时状态（已 gitignore） |
+| `~/.dsh/profiles/web/package.json` | 新增 `@dsh-external/dsh-codely-quota`（`link:` 依赖 + bundles 条目），dsh 启动自动装配额度圈（`npm run uninstall` 会移除） |
 
 注意：setup 会用 YAML 库重写 dsh 的两个配置文件，**原文件中的注释会丢失**，因此修改前会先做备份。
 

@@ -50,6 +50,9 @@ dsh 插件（hybrid 形态）：在 dsh web 里放一个**右下角悬浮小圆�
 
 ## 注入与迭代
 
+> 一键装配：**`npm run setup`（codely-dsh-bridge 根目录）已自动把本插件装进 dsh profile**
+> （dependencies `link:` + bundles），dsh 启动即加载——换机器重跑 setup 即自动完成。以下为手动/开发方式：
+
 ```bash
 # 注入（dsh-super-injector，免重启；重启后由注入清单自动恢复）
 dev_inject_plugin {"dir": "<本插件绝对路径>"}

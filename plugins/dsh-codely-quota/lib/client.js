@@ -433,15 +433,27 @@ window.__ModuleLoader__.load({
       };
     }
 
+    /** shell.overlay 悬浮层条目（座席占位：保持注入器 slot 骨架契约）。球体本身直接挂 document.body，此条目渲染 null 不占视觉。 */
+    function NoopOverlayEntry() { return null; }
+
     module.exports = {
       inject: ["slots"],
       apply: function (ctx) {
         ctx.effect(function () {
           if (activeDispose) { try { activeDispose(); } catch (e) { /* 忽略 */ } }
           activeDispose = buildPet();
+          var unregister = null;
+          try {
+            unregister = ctx.slots.register({
+              name: "shell.overlay",
+              id: "codely-quota",
+              order: 1e9
+            }, NoopOverlayEntry);
+          } catch (e) { /* slot 尚未声明时忽略——不影响球体挂载 */ }
           return function () {
             try { activeDispose(); } catch (e) { /* 忽略 */ }
             activeDispose = null;
+            if (unregister) { try { unregister(); } catch (e) { /* 忽略 */ } }
           };
         }, "@dsh-external/dsh-codely-quota: pet");
       },

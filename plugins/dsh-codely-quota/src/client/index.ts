@@ -14,7 +14,12 @@
  */
 export const inject = ['slots']
 
-type Ctx = { effect(fn: () => void | (() => void), label?: string): void }
+type Ctx = {
+  effect(fn: () => void | (() => void), label?: string): void
+  slots: {
+    register(options: { name: string; id: string; order?: number }, component?: () => null): () => void
+  }
+}
 
 const API = '/@dsh-external/dsh-codely-quota/api'
 const POS_KEY = 'dsh-codely-quota.pos.v1'
@@ -95,13 +100,21 @@ const WIN_LABEL: Record<string, string> = {
 
 let activeDispose: (() => void) | null = null
 
+/** shell.overlay 悬浮层条目（座席占位：保持注入器 slot 骨架契约）。球体本身直接挂 document.body，此条目渲染 null 不占视觉。 */
+function NoopOverlayEntry(): null { return null }
+
 export function apply(ctx: Ctx): void {
   ctx.effect(() => {
     if (activeDispose) { try { activeDispose() } catch { /* 忽略旧实例 */ } }
     activeDispose = buildPet()
+    let unregister: (() => void) | null = null
+    try {
+      unregister = ctx.slots.register({ name: 'shell.overlay', id: 'codely-quota', order: 1e9 }, NoopOverlayEntry)
+    } catch { /* slot 尚未声明时忽略——不影响球体挂载 */ }
     return () => {
       try { activeDispose?.() } catch { /* 忽略 */ }
       activeDispose = null
+      try { unregister?.() } catch { /* 忽略 */ }
     }
   }, '@dsh-external/dsh-codely-quota: pet')
 }

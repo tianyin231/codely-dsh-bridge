@@ -12,6 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 
 const HERE = __dirname;
 const BASE = 'https://codely.tuanjie.cn';
@@ -196,13 +197,19 @@ function resolveBackendMeta(backend) {
  * 取出现次数最多且能解析到窗口的后端为准，返回其 { alias, backend, contextWindow, input }。
  * 单次/单 alias 失败跳过（不抛错），整体网络失败才抛错。
  *
+ * 双模式：
+ *   · 走代理（不传 apiKey）：由代理注入密钥与身份头，本函数只带 x-codely-probe 标记。
+ *   · 直连（传 apiKey）：附带网关强制的身份头（CLIENT_HEADERS）与会话标识，与代理注入行为一致。
+ *
  * @param opts.base 代理或直连 base（如 http://127.0.0.1:8790/v1），默认 LITELLM_HOST 直连
- * @param opts.apiKey sk- 密钥（直连时需要；走代理可省，代理自己会取 key）
+ * @param opts.apiKey sk- 密钥（直连时必填；走代理可省，代理自己会取 key）
  * @param opts.samples 每 alias 采样次数（默认 3）
  */
 async function probeBackends(aliases, { base, apiKey, concurrency = 4, samples = 3 } = {}) {
   if (!Array.isArray(aliases) || aliases.length === 0) return [];
   const b = (base || `https://${LITELLM_HOST}/v1`).replace(/\/+$/, '');
+  const direct = !!apiKey;
+  const sessionId = direct ? crypto.randomUUID() : null;
   const results = [];
   let idx = 0;
   async function worker() {
@@ -212,14 +219,22 @@ async function probeBackends(aliases, { base, apiKey, concurrency = 4, samples =
       let lastErr = null;
       for (let s = 0; s < samples; s++) {
         try {
-          const headers = { Authorization: `Bearer ${apiKey || ''}`, 'Content-Type': 'application/json' };
-          if (!apiKey) delete headers.Authorization; // 走代理：由代理注入密钥与身份头
+          const headers = { 'Content-Type': 'application/json' };
           // x-codely-probe 标记：让代理识别内部探测请求，不刷入 [proxy] 请求日志
           headers['x-codely-probe'] = '1';
+          const body = { model: alias, messages: [{ role: 'user', content: '验证' }], max_completion_tokens: 4, stream: false };
+          if (direct) {
+            // 直连：网关校验官方 CLI 身份特征并强制会话标识，缺失会被 400/非法 session 拒绝
+            headers.Authorization = `Bearer ${apiKey}`;
+            Object.assign(headers, CLIENT_HEADERS);
+            headers['x-litellm-session-id'] = sessionId;
+            body.litellm_session_id = sessionId;
+            body.metadata = { session_id: sessionId };
+          }
           const r = await fetch(`${b}/chat/completions`, {
             method: 'POST',
             headers,
-            body: JSON.stringify({ model: alias, messages: [{ role: 'user', content: '验证' }], max_completion_tokens: 4, stream: false }),
+            body: JSON.stringify(body),
           });
           const j = await r.json().catch(() => ({}));
           if (!r.ok) { lastErr = `${r.status} ${(j.error?.message || '').slice(0, 60)}`; continue; }
