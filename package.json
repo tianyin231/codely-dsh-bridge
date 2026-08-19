@@ -12,6 +12,7 @@
     "login": "node login.js",
     "models": "node models.js",
     "backend-probe": "node backend-probe.js",
+    "quota": "node codely-quota.js",
     "start": "node codely-proxy.js",
     "setup": "node setup.js",
     "uninstall": "node uninstall.js",

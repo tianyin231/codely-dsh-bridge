@@ -1,0 +1,4 @@
+node_modules/
+*.tsbuildinfo
+*.tgz
+# 注：lib/ 为本包直接部署产物（手写 ESM/CJS，无构建链依赖），随仓库提交，注入即用

@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const auth = require('./codely-auth');
+const quota = require('./codely-quota');
 
 /* ─── 命令行参数 ─── */
 function argValue(name, env, def) {
@@ -32,7 +33,11 @@ if (argFlag('--help') || argFlag('-h')) {
 
   --port N   监听端口        （默认 8790，或环境变量 CODELY_PROXY_PORT）
   --bind H   监听地址        （默认 127.0.0.1，仅本机）
-  --help     显示本帮助`);
+  --help     显示本帮助
+
+端点:
+  /healthz   健康检查
+  /quota     积分余额快照（每日赠送/充值余额/套餐窗口/月度统计，15s 缓存；?force=1 强制刷新）`);
   process.exit(0);
 }
 
@@ -197,6 +202,30 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ ok: true, upstream: UPSTREAM_HOST, keyCached: !!loadCachedKey() }));
   }
+  // 积分余额快照（供 dsh-codely-quota 插件 / 人工 curl 查询）
+  // 仅允许 loopback Host 访问（127.0.0.1/localhost 端口），防 DNS rebinding 被网页读取
+  if (req.url === '/quota' || req.url.startsWith('/quota?')) {
+    const host = String(req.headers.host || '');
+    const okHost = /^(127\.0\.0\.1|localhost|::1)(:\d+)?$/i.test(host);
+    if (!okHost) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, error: 'forbidden host' }));
+    }
+    const force = new URL(req.url, 'http://x').searchParams.get('force') === '1';
+    const started = Date.now();
+    quota.fetchQuotaSnapshot({ force })
+      .then((data) => {
+        log('quota', `积分额度快照 -> 200 (${Date.now() - started}ms, ${force ? '强制' : '缓存'})`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, fetchedAt: data.fetchedAt, data }));
+      })
+      .catch((e) => {
+        log('quota', `积分额度快照失败: ${e.message}`);
+        res.writeHead(502, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: e.message }));
+      });
+    return;
+  }
   const chunks = [];
   req.on('data', (c) => chunks.push(c));
   req.on('end', () => handle(req, res, Buffer.concat(chunks)));
@@ -204,7 +233,7 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, BIND, () => {
-  log('proxy', `监听 http://${BIND}:${PORT}/v1  (健康检查: /healthz)`);
+  log('proxy', `监听 http://${BIND}:${PORT}/v1  (健康检查: /healthz, 积分额度: /quota)`);
   log('proxy', `上游   https://${UPSTREAM_HOST}/v1`);
   const creds = auth.loadCreds();
   log('proxy', `凭据: ${creds ? creds.source : '未找到（npm run login 或用官方 CLI 登录）'}`);

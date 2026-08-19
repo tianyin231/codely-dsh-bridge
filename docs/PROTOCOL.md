@@ -120,6 +120,26 @@ curl https://codely-litellm.tuanjie.cn/v1/chat/completions \
 | 400 | `非法session` | 缺会话标识 → 见 §2.3 |
 | 405 | `Method Not Allowed`（`/v1/models/<id>:generateContent`） | 网关不开放 Gemini 原生格式，用 OpenAI 格式 |
 
+## 7. 积分额度接口（2026-08 实测）
+
+桥接侧新增的「积分余额」数据来自官网 `codely.tuanjie.cn` 的 OAuth 接口（Bearer `access_token`，与换 key 同一凭据），与 LiteLLM 网关的 `/key/info` 互补。全部为官方网页端（`/static/web/assets/index-*.js` SPA）实际调用的接口，供 `codely-quota.js` / `codely-proxy.js /quota` 消费：
+
+| 接口 | 用途 | 关键字段 |
+|---|---|---|
+| `GET /api/user/billing/usage/summary` | **积分总账（核心）** | `daily_allowance`（每日赠送：`quota_points/used_points/remaining_points/period_start_at/period_end_at/quota_timezone`）、`billing`（`effective_available_points` 充值余额、`is_exhausted`、`recharged_points`、`grant_expirations`）、`coding_plan`（付费套餐窗口）、`period`/`totals`（月度）、`lifetime`、`daily`、`model_token_daily` |
+| `GET /api/user/plan` | 套餐类型 | `{plan_type: free\|…, plan_tag, is_team_plan, is_active, can_upgrade}` |
+| `GET https://codely-litellm.tuanjie.cn/key/info` | 网关虚拟密钥 | `spend`（LiteLLM 计费口径）、`rpm_limit`（实测 200）、`tpm_limit`、`max_parallel_requests`；用 sk- 密钥 Bearer，无需 UA |
+| `GET /api/user/billing/usage?start_date=&end_date=&page=&page_size=` | 逐笔结算明细 | `items[]`：`label`（模型）、`points_delta`、`source_amount_delta`、`point_ratio`（=100，$1 计 100 积分）、token 明细、`status` |
+| `GET /api/billing/daily-spend` | 今日花费 | `totalPoints/byModelGroup`（按日结算，深夜才出账） |
+| `GET /api/billing/packages` | 充值套餐 | 基础包 199元=19900、进阶包 399元=44900、专业包 699元=84900 积分（`basePoints/bonusPoints/totalPoints`） |
+| `GET /api/billing/transactions?page=&pageSize=` | 流水 | 充值/消费记录 |
+| `GET /api/user/billing/purchases` | 订单 | `plans[]/topups[]` |
+
+> `GET /api/billing/balance` 已下线（410 `Billing balance endpoint is disabled`），余额一律以 usage/summary 为准。
+> 401 时 access_token 过期 → 用 `/auth/refresh` 续期后重试一次（`codely-quota.js` 已实现）。
+
+**套餐窗口（付费限额）语义**：`coding_plan.windows[]` 的 `window_type` 枚举为 `usage_5h`（5 小时用量窗）、`subscription_week`（订阅周）、`subscription_month`（订阅月）——即用户常说的「五小时/周/月限额」；每窗口字段 `quota_points / used_points / remaining_points / exhausted / next_boundary_at`。免费号 `coding_plan.found=false` 无窗口；付费后由官网返回，插件面板自动展示。
+
 ## 5. 官方 CLI 相关实现（二进制中的位置，便于核对更新）
 
 - Anthropic 兼容层 `getAuthHeaders()`：`{"x-api-key": key, authorization: "Bearer " + key}`

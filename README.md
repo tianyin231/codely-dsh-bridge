@@ -99,6 +99,52 @@ npm run setup -- --set-default --model codely-core
 
 密钥额度与你在 codely CLI 里用的是同一份（实测速率限制 200 RPM）。
 
+## 附带：dsh 积分额度悬浮圈插件（dsh-codely-quota）
+
+本仓库顺带打包了一个 **dsh 插件**（`plugins/dsh-codely-quota`）：在 dsh web 右下角放一个**悬浮小圆环**
+（类似 dsh 的上下文占用指示圈），一眼看出每日额度剩余比例，**点击展开**各积分详情；还给 agent 一个 `codely_quota` 工具随时查询：
+
+```
+┌─ dsh web 悬浮额度圈 ─┐   ┌────────────────────┐   ┌────────────────┐   ┌───────────────┐
+│ 圆环=剩余比例(色阶)   │──▶│ 插件 host API      │──▶│ 本仓库代理      │──▶│ Codely 官网   │
+│ 点击展开全部详情      │   │ /…/codely-quota/api │   │ GET /quota      │   │ billing/usage│
+└──────────────────────┘    /health 15s /quota 30s   15s 缓存         access_token 自动续期
+                                                         ↕
+                              ⚙️ 代理没开就不启用：/health 探测离线时整个隐藏，恢复后自动出现
+```
+
+**交互**：单击圆环展开/收起详情浮层（点外部 / Esc 收起）；按住可拖拽换位置（localStorage 记忆）；浮层内「刷新」按钮强制刷新。
+
+展开后展示四块**实时积分数据**（数据源=官网 `/api/user/billing/usage/summary`，官方口径）：
+
+| 区块 | 内容 |
+|---|---|
+| 每日赠送 | 免费/基础档每日 10000 积分：剩余 / 已用 / 进度条 / **距每日重置倒计时**（0 点 Asia/Shanghai） |
+| 积分账户 | 充值积分余额（`effective_available_points`）、累计充值、可申请赠送提示 |
+| 套餐窗口限额 | 付费 codely coding plan 的 **`usage_5h`（5小时用量窗）/ `subscription_week`（订阅周）/ `subscription_month`（订阅月）** 三个窗口的额度/已用/剩余与下次刷新时间——免费号不显示窗口，付费后自动出现 |
+| 本月统计 | 当月消耗积分、结算次数、令牌量、网关速率限制（如 200 RPM） |
+
+配套能力：
+
+- **`codely_quota` 工具**：agent 在会话中直接调用即可拿到上面的摘要文本（可 `force` 强制刷新）——长任务前先看还剩多少额度。
+- **`npm run quota`**：不开 dsh 也能在终端看同样的数据。
+- 本仓库代理新增 **`GET /quota`** 端点（`?force=1` 强制刷新），只监听 loopback 且校验 Host，防 DNS rebinding。
+
+### 使用
+
+```bash
+# 1. 代理先跑起来（悬浮圈数据都从本地代理取；代理不跑时悬浮圈自动隐藏）
+npm start
+
+# 2. 注入插件（当前机器已注入；换机器见下）
+#    dev_inject_plugin {"dir": "…/codely-dsh-bridge/plugins/dsh-codely-quota"}
+
+# 3. 刷新 dsh web 页面 → 右下角出现「额度圈」（点击展开详情）
+```
+
+> 注入通过 dsh-super-injector（运行时注入，重启后由注入清单自动恢复）。改 `lib/` 代码后重跑注入/重载即可。
+> 插件配置：`proxyBaseURL`（默认 `http://127.0.0.1:8790`）、`cacheMs`（host 缓存）、`refreshMs`（悬浮圈自动刷新）。
+
 ## 命令一览
 
 | 命令 | 作用 |
@@ -106,6 +152,7 @@ npm run setup -- --set-default --model codely-core
 | `npm run login` | 独立登录（设备码流程，浏览器授权一次，凭据存 `codely-creds.json`） |
 | `npm run models` | 查询当前账号可用的模型列表 |
 | `npm run backend-probe` | 探测 `codely-*` 别名背后的真实后端模型（读网关透传的 `resp.model`） |
+| `npm run quota` | 终端直接查看积分余额（每日赠送/充值余额/套餐窗口/月度统计，`--force` 强制刷新） |
 | `npm run setup` | 安装/更新配置（自动检测可用模型，备份原文件为 `*.bak-codely`） |
 | `npm start` | 启动代理（默认 `127.0.0.1:8790`，`--port N` 可改端口，需与 setup 的 `--port` 一致） |
 | `npm test` | 冒烟测试（healthz / models / 一次对话） |
@@ -155,10 +202,13 @@ npm run uninstall     # 恢复 dsh 配置备份
 codely-dsh-bridge/
 ├── login.js           # 独立登录（设备码流程，免装 codely CLI）
 ├── codely-auth.js     # 凭据管理（本地 creds 优先，官方 CLI 回退，自动刷新）
-├── codely-proxy.js    # 本地代理（核心）
+├── codely-proxy.js    # 本地代理（核心；含 /quota 积分端点）
+├── codely-quota.js    # 积分余额查询（summary/plan/key-info，15s 缓存；可 CLI：npm run quota）
 ├── setup.js           # 安装脚本（幂等）
 ├── uninstall.js       # 回滚脚本
 ├── start.cmd          # Windows 一键启动
+├── plugins/
+│   └── dsh-codely-quota/   # 附带 dsh 插件：积分额度悬浮圈（点击展开详情）+ codely_quota 工具
 ├── test/smoke.js      # 冒烟测试
 └── docs/PROTOCOL.md   # 网关协议逆向笔记（维护必读）
 ```
