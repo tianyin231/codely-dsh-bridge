@@ -106,7 +106,7 @@ dev_uninject_plugin {"match": "dsh-codely-quota"}
 | `GET /health` | `{proxyUp, proxyBaseURL, refreshMs, account}` 连通性/配置 |
 | `GET /accounts` | 已登录账号列表（`{current, account, list[]}`） |
 | `POST /account/switch?name=<账号>` | 切换到指定账号（同 CLI `npm run account -- switch`，免重启） |
-| `POST /account/login/start` | 发起设备码登录（返回验证链接+用户码），自动打开官方登录页 |
+| `POST /account/login/start` | 发起设备码登录（返回验证链接+用户码；不自动弹窗，由客户端引导复制到无痕/另一浏览器授权） |
 | `GET /account/login/status` | 轮询授权状态；`authorized` 时已自动保存账号并激活 |
 | `POST /account/login/cancel` | 取消进行中的登录 |
 

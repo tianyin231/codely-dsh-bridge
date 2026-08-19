@@ -140,9 +140,29 @@ curl https://codely-litellm.tuanjie.cn/v1/chat/completions \
 
 **套餐窗口（付费限额）语义**：`coding_plan.windows[]` 的 `window_type` 枚举为 `usage_5h`（5 小时用量窗）、`subscription_week`（订阅周）、`subscription_month`（订阅月）——即用户常说的「五小时/周/月限额」；每窗口字段 `quota_points / used_points / remaining_points / exhausted / next_boundary_at`。免费号 `coding_plan.found=false` 无窗口；付费后由官网返回，插件面板自动展示。
 
-## 5. 官方 CLI 相关实现（二进制中的位置，便于核对更新）
+## 8. 多账号管理与切换（本项目自建，非官方接口）
 
-- Anthropic 兼容层 `getAuthHeaders()`：`{"x-api-key": key, authorization: "Bearer " + key}`
+多账号是桥接层自建能力（不影响上游），由 `codely-accounts.js` 注册表 + 代理本地端点实现：
+
+- **注册表**：`accounts/index.json`（当前账号 + 账号元信息）与 `accounts/<name>.json`（各账号完整 OAuth 凭据）；
+  `codely-creds.json` 始终等于「当前激活账号」凭据（老链路 auth/proxy/quota/setup 零改动）。
+- **切换语义**：激活 = 复制账号凭据到 `codely-creds.json` + 删除 `key.cache`/`session.cache`（下次请求自动
+  用新凭据换取 sk- 密钥、重开会话）+ 清配额缓存（按账号指纹失效）+ 重探模型写回 settings.yaml。
+- **代理端点**（全部仅 loopback Host 可访问，防 DNS rebinding）：
+
+| 端点 | 说明 |
+|---|---|
+| `GET /accounts` | 已登录账号列表 `{current, account, list[]}` |
+| `POST /account/switch?name=<账号>` | 切换到指定账号（换凭据+密钥、清缓存、异步重探模型） |
+| `POST /account/login/start` | 小球内设备码登录发起（复用 §1 的 `/auth/device/*` 流程，返回验证链接+用户码） |
+| `GET /account/login/status` | 轮询授权；`authorized` 时已自动 `saveAccount`+`activateAccount`；同账号授权返回 `same:true` |
+| `POST /account/login/cancel` | 取消进行中的设备码登录（登录态仅存代理进程内存） |
+
+- **授权跟随浏览器会话**：设备码授权给「打开验证链接的那个浏览器会话」（Unity ID 登录页无账号切换按钮）。
+  主浏览器已登录时会瞬间授权当前账号并消耗设备码——因此小球不自动弹窗，引导用户复制链接到无痕窗口/另一
+  浏览器打开；授权结果与当前账号相同时不重复添加（`same:true`），不同账号自动登记并切换（撞名加 `-2` 后缀）。
+
+## 5. 官方 CLI 相关实现（二进制中的位置，便于核对更新）- Anthropic 兼容层 `getAuthHeaders()`：`{"x-api-key": key, authorization: "Bearer " + key}`
 - 真实请求走 OpenAI SDK（`X-Stainless-*` 头组）打 `/v1/chat/completions`
 - `fetchCliApiKey()`：GET `${codely.tuanjie.cn}/api/api-token/cli-api-key?teamId=...`
 - 默认 base URL 常量 `$5 = "https://codely-litellm.tuanjie.cn/v1"`（硬编码，无环境变量可覆盖）
