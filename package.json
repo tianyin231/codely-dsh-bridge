@@ -1,7 +1,7 @@
 {
   "name": "codely-dsh-bridge",
   "version": "1.0.0",
-  "description": "让 dsh (DeepSeek Harness) 通过本地代理使用 Codely CLI 账号额度（LiteLLM 网关）",
+  "description": "把 Codely（Unity 中国旗下 AI 智能体，官方 agent：Tuanjie Cowork）账号的模型额度经本地代理接入 dsh（DeepSeek Harness）使用，支持多账号管理与丝滑切换",
   "main": "codely-proxy.js",
   "bin": {
     "codely-dsh-proxy": "./codely-proxy.js",

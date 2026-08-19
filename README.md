@@ -1,8 +1,12 @@
 # codely-dsh-bridge
 
-让 [dsh](https://www.npmjs.com/package/@deepseek-ai/dsh)（DeepSeek Harness，`npx @deepseek-ai/dsh web`）**直接使用 Codely CLI 的账号额度**。
+把 **Codely 账号的模型额度** 接入 [dsh](https://www.npmjs.com/package/@deepseek-ai/dsh)（DeepSeek Harness，`npx @deepseek-ai/dsh web`）使用。
 
-原理是在本地跑一个小代理，把 dsh 发出的 OpenAI 格式请求转发到 Codely 的 LiteLLM 网关，并自动补上网关强制校验的客户端身份与会话标识——这些校验导致 dsh 无法直连网关（详见 [docs/PROTOCOL.md](docs/PROTOCOL.md)）。
+**背景**：[Codely](https://codely.tuanjie.cn) 是 [Unity 中国](https://www.unity.cn)（Tuanjie / 团结引擎）旗下的 AI 编程智能体，官方 agent 名为 **Tuanjie Cowork**（媒体亦称「团结 Codely」）；账号登录体系为 Unity ID，模型推理走 `codely-litellm.tuanjie.cn` 的 LiteLLM 网关。额度属于**你的 Codely 账号**（每日赠送 / 充值积分 / 订阅套餐窗口），与官方 agent 共用同一份。
+
+**本项目做什么**：在本地跑一个小代理，把 dsh 发出的 OpenAI 格式请求转发到 Codely 的 LiteLLM 网关，并自动补上网关强制校验的客户端身份与会话标识——这些校验导致 dsh 无法直连网关（详见 [docs/PROTOCOL.md](docs/PROTOCOL.md)）。**不改造 dsh、不绕过计费**：用的就是你账号自己的额度，只是把官方 agent 独占的模型通道「代理」给 dsh 用，并提供多账号额度的统一管理与一键丝滑切换（见「多账号切换」）。
+
+> ⚠️ 本项目为**非官方个人项目**，与 Unity 中国 / Codely 无任何隶属关系；接口为个人逆向所得、随时可能变更，仅供把自己已购的额度接入常用工具链使用，请遵守 Codely 服务条款。
 
 ```
 ┌─────────┐  OpenAI 格式      ┌────────────────────┐  注入身份头/会话    ┌──────────────────────────────┐
@@ -11,7 +15,7 @@
 └─────────┘                   └────────────────────┘                    └──────────────────────────────┘
                                        │  sk- 密钥失效时自动刷新
                                        ▼
-                              ~/.codely-cli 登录凭据 ──▶ codely.tuanjie.cn/api/api-token/cli-api-key
+  登录凭据（本项目 codely-creds.json 或 ~/.codely-cli）──▶ codely.tuanjie.cn/api/api-token/cli-api-key
 ```
 
 ## 环境要求
