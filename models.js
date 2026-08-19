@@ -11,6 +11,12 @@
 
 const auth = require('./codely-auth');
 
+function argValue(name, def) {
+  const i = process.argv.indexOf(name);
+  return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : def;
+}
+const PORT = argValue('--port', '8790');
+
 async function main() {
   const creds = await auth.getAccessToken();
   if (!creds) {
@@ -18,7 +24,7 @@ async function main() {
     process.exit(1);
   }
   const key = await auth.fetchApiKey(creds);
-  const models = await auth.fetchAvailableModels(key);
+  const models = await auth.fetchAvailableModels(key, { proxyBaseURL: `http://127.0.0.1:${PORT}/v1` });
 
   console.log(`Codely API 密钥: ${key.slice(0, 6)}...`);
   console.log(`可用模型 (${models.length}):\n`);

@@ -17,46 +17,46 @@ const path = require('path');
 const os = require('os');
 const yaml = require('js-yaml');
 const auth = require('./codely-auth');
+const coconfig = require('./codely-config');
 
 const HERE = __dirname;
 const DSH_HOME = path.join(os.homedir(), '.dsh');
 
-/* 已知模型的元信息补充（upstream /v1/models 不返回这些，需本地维护）
- * 仅当模型实际出现在 /v1/models 响应中时才写入 settings，避免死模型误导。
- * 新模型上线后重跑 npm run setup 即可自动纳入。 */
-const MODEL_META = {
-  'codely-core': { contextWindow: 1048576 },
-  'codely-vl': { input: ['text', 'image'] },
-  'GLM-5.2': { contextWindow: 1048576 },
-  'GLM-5.3': { contextWindow: 1048576 },
-};
-
-/* 查询 /v1/models 失败时的保守回退（只含几乎一定可用的 codely-* 别名，不含 GLM） */
+/* 查询 /v1/models 失败时的保守回退。
+ * 只列 id、不带窗口/模态信息（避免写死误导；缺失时 dsh 用框架默认 256K，安全但会早压缩）。
+ * 注意：账号不一定包含全部档位，若写入的模型实际不可用，代理会把上游
+ * “team not allowed to access model”错误原样透传给 dsh，不会静默失败。 */
 const FALLBACK_MODELS = [
-  { id: 'codely-core', contextWindow: 1048576 },
+  { id: 'codely-core' },
   { id: 'codely-flash' },
   { id: 'codely-air' },
   { id: 'codely-basic' },
-  { id: 'codely-vl', input: ['text', 'image'] },
+  { id: 'codely-vl' },
 ];
 
-/** 查询 upstream /v1/models，合并已知元信息，返回 {models, liveIds} */
+/** 查询模型列表（优先走本地代理，与 dsh 实际路径同源），探测真实后端校正窗口，返回 {models, liveIds, backends} */
 async function detectModels(key) {
   let liveData;
   try {
-    liveData = await auth.fetchAvailableModels(key);
+    liveData = await auth.fetchAvailableModels(key, { proxyBaseURL: `http://127.0.0.1:${PORT}/v1` });
   } catch (e) {
-    console.warn(`\n[!] 检测可用模型失败 (${e.message})，使用保守回退列表`);
-    return { models: FALLBACK_MODELS, liveIds: new Set(FALLBACK_MODELS.map(m => m.id)) };
+    console.warn(`\n[!] 检测可用模型失败 (${e.message})`);
+    console.warn('    已改用保守回退列表（仅保险兜底，可能不含/多含当前账号真实可用模型，且窗口信息缺失）');
+    console.warn(`    请确认代理已启动 (npm start) 后重跑: npm run setup`);
+    return { models: FALLBACK_MODELS, liveIds: new Set(FALLBACK_MODELS.map(m => m.id)), backends: [] };
   }
   const liveIds = liveData.map(m => m.id);
-  const models = liveData.map(m => {
-    const meta = { ...MODEL_META[m.id] };
-    if (m.max_model_len && !meta.contextWindow) meta.contextWindow = m.max_model_len;
-    return { id: m.id, ...meta };
-  });
+
+  // 探测每个 alias 的真实后端（经本地代理：代理注入 sk- 密钥与身份头）
+  console.log(`\n  探测真实后端 ...`);
+  const backends = await auth.probeBackends(liveIds, { base: `http://127.0.0.1:${PORT}/v1` });
+  for (const b of backends) {
+    const w = b.contextWindow ? `${Math.round(b.contextWindow / 1024)}K` : (b.error ? `探测失败(${b.error})` : '?');
+    console.log(`    ${b.alias.padEnd(15)} -> ${b.backend || b.error}  (ctx ${w})`);
+  }
+  const models = coconfig.buildModels(liveData, backends);
   console.log(`检测到 ${models.length} 个: ${liveIds.join(', ')}`);
-  return { models, liveIds: new Set(liveIds) };
+  return { models, liveIds: new Set(liveIds), backends, liveData };
 }
 
 function argValue(name, def) {
@@ -121,21 +121,13 @@ async function main() {
   /* 3. 注册 dsh provider */
   process.stdout.write('[3/5] 配置 ~/.dsh/settings.yaml ... ');
   if (!fs.existsSync(DSH_HOME)) die(`未找到 ${DSH_HOME}，请先运行过一次 dsh`);
-  const settingsPath = path.join(DSH_HOME, 'settings.yaml');
+  const settingsPath = coconfig.SETTINGS_PATH;
   backupOnce(settingsPath);
-  const settings = loadYaml(settingsPath);
-  settings['llm-pi-ai'] ||= {};
-  settings['llm-pi-ai'].providers ||= {};
-  settings['llm-pi-ai'].providers.codely = {
-    apiKeyEnv: 'CODELY_API_KEY',
-    api: 'openai-completions',
-    baseURL: `http://127.0.0.1:${PORT}/v1`,
+  coconfig.writeCodelyProvider({
+    port: PORT,
     models: detected.models,
-  };
-  if (SET_DEFAULT) {
-    settings['agent-default-model'] = { provider: 'codely', model: defaultModel };
-  }
-  saveYaml(settingsPath, settings);
+    defaultModel: SET_DEFAULT ? defaultModel : undefined,
+  });
   console.log('完成');
 
   /* 4. 写入凭据 */

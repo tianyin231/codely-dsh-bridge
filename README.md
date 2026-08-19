@@ -46,6 +46,21 @@ dsh web          # 模型列表里选 codely 系列
 dsh --profile headless "你好"
 ```
 
+**启动即实时映射**：`npm start` 启动代理时，会自动探测每个 alias 的真实后端（网关透传的 `resp.model`），把「真实模型代号 + 上下文窗口」同步写入 `~/.dsh/settings.yaml`，dsh 模型选择界面随即自动刷新显示真实代号（如 `glm-5-fp8-128k（codely-core）` 或 `glm-5-2-260617（codely-core）`、`deepseek-v4-flash-0731（codely-flash）`、`qwen3.5-397b-a17b（codely-vl）`…），无需手动重跑 setup；官方新放行模型也会自动纳入。启动时的探测日志大致长这样：
+
+```text
+[proxy] 探测真实后端（经本代理，共 5 个 alias）...
+[proxy] GET /v1/models -> 200 (205ms)
+[probe]   codely-basic    -> deepseek-v4-flash-0731  (上下文 1024K)
+[probe]   codely-flash    -> deepseek-v4-flash-0731  (上下文 1024K)
+[probe]   codely-air      -> deepseek-v4-flash-0731  (上下文 1024K)
+[probe]   codely-vl       -> qwen3.5-397b-a17b  (上下文 128K, 支持图片)
+[probe]   codely-core     -> glm-5-2-260617  (上下文 128K)      # 可能显示 glm-5-fp8-128k，见下文"映射非单一"
+[probe] 已同步 5 个模型到 ~/.dsh/settings.yaml，dsh 模型选择界面将自动刷新
+```
+
+> 注：`codely-core` 每次启动显示的代号**可能不同**（`glm-5-fp8-128k` / `glm-5-2-260617` 等 GLM-5 多后端轮换），属正常现象，详见"可用模型"章节的映射规则。
+
 想把 codely 设为 dsh 默认模型（跳过手选）：
 
 ```bash
@@ -56,18 +71,31 @@ npm run setup -- --set-default --model codely-core
 
 ## 可用模型
 
-模型列表在 `npm run setup` 时**实时查询** `/v1/models` 自动写入，不写死——不同账号/会员档位可用的模型不同。
+模型列表在 `npm run setup` 时**实时查询** `/v1/models` 自动写入，不写死——不同账号/会员档位可用的模型不同。查询**优先走本地代理**（与 dsh 实际请求同一条路），代理未启动时自动回退直连网关。
 
-| dsh 中的模型 ID | 说明 |
-|---|---|
-| `codely-core` | 旗舰推理模型（1M 上下文） |
-| `codely-flash` | 快速模型（实际路由 DeepSeek-V4-Flash） |
-| `codely-air` / `codely-basic` | 轻量/基础档 |
-| `codely-vl` | 多模态（文本 + 图片） |
-| `GLM-5.2` / `GLM-5.3` | GLM 系列（1M 上下文，**需充值会员**，非会员不可用） |
+> **真实后端**：LiteLLM 网关会在 `chat.completions` 响应的 `model` 字段透传真实后端模型名（非模型自报，无法伪造）。下表来自 `npm run backend-probe` 实测，随网关部署可能变化。
 
-> 查看当前账号实际可用的模型: `npm run models`
-> 升级会员后 GLM 系列恢复可用，重跑 `npm run setup` 即可同步到 dsh。
+| dsh 中的模型 ID | 名称（选择器显示，真实后端代号） | 真实后端（网关透传） | 上下文窗口 |
+|---|---|---|---|
+| `codely-core` | `glm-5-fp8-128k（codely-core）` **或** `glm-5-2-260617（codely-core）` | `glm-5-fp8-128k` / `glm-5-2-260617`（GLM-5 多部署） | **128K**（非 1M） |
+| `codely-flash` | `deepseek-v4-flash-0731（codely-flash）` | `deepseek-v4-flash-0731` | 1M |
+| `codely-air` / `codely-basic` | `deepseek-v4-flash-0731（codely-air/basic）` | `deepseek-v4-flash-0731` | 1M |
+| `codely-vl` | `qwen3.5-397b-a17b（codely-vl）` | `qwen3.5-397b-a17b`（Qwen3.5 MoE） | 128K |
+
+> **⚠️ `codely-core` 的映射不是单一的**：实测发现它背后是**多个 GLM-5 后端负载均衡轮换**（`glm-5-fp8-128k` 与 `glm-5-2-260617` 等，均属 GLM-5 系、都是 128K 上下文），不同启动/请求可能透传出不同代号。因此：
+> - `name` 只会显示**某一次探测到的那个**代号，不代表 core 永远只有那一个后端；
+> - `contextWindow` 取 GLM-5 系的统一窗口 **128K**，与具体轮换到哪个部署无关，所以压缩阈值是稳定的；
+> - 判断一个 alias 「到底是什么」应看**系/家族**（如 core=GLM-5 系、flash=DeepSeek-V4-Flash），而非某一次透传的精确版本号。
+
+> **映射规则**：`id` 必须是 alias（网关只放行 `codely-*`，改真实代号会 401）；`name` 显示"真实后端代号（alias）"，由启动探测动态生成。**探测逻辑**：代理/`setup` 对每个 alias 采样数次（`samples`，默认 3），取出现次数最多的后端作为映射，并消抖网关的负载均衡轮换；单次失败自动跳过。官方**新增放行模型**时会自动纳入（代理先 GET `/v1/models` 取实时列表再逐个探测），无需改代码。
+
+> **等价关系**：官方 agent 里的 `core(GLM-5.2_MAX)` 在桥接侧由 `codely-core`（GLM-5 主通道）+ `codely-flash`（DeepSeek-V4-Flash fast 兜底）混合额度组成，基本等价。
+>
+> **关于上下文**：`contextWindow` **只影响 dsh 内部上下文压缩阈值，不会显示在模型选择页**——该页只渲染 `name`（主标签）。其中 `codely-core` 是 **128K 而非 1M**（GLM-5 系实测统一 128K，上游 `/v1/models` 声称的 1M 与真实后端不符；setup/代理均按实测 128K 写入）。
+>
+> 查看当前账号实际可用的模型: `npm run models`；核对真实后端: `npm run backend-probe`；重跑 `npm run setup` 同步到 dsh。
+
+> ⚠️ **关于 GLM 系列（含 `glm-5.2-max`）**：在你自己的 Codely 网页 agent 里能看到/用到 GLM，不代表桥接侧可用。桥接用的 `sk-` 密钥对应的团队白名单是 `['alias-only-proxy-models']`（即上表 5 个 `codely-*` 别名），任何 GLM 命名（`glm-5.2-max` / `GLM-5.2` / `GLM-5.3` 等）都返回 `401 team not allowed to access model`。Codely 自家 agent 大概率是服务端独立鉴权/预置，客户端密钥拿不到该通道。GLM 出现在桥接列表的唯一前提是它进了你的团队白名单（届时 `/v1/models` 会直接返回它）。
 
 密钥额度与你在 codely CLI 里用的是同一份（实测速率限制 200 RPM）。
 
@@ -77,6 +105,7 @@ npm run setup -- --set-default --model codely-core
 |---|---|
 | `npm run login` | 独立登录（设备码流程，浏览器授权一次，凭据存 `codely-creds.json`） |
 | `npm run models` | 查询当前账号可用的模型列表 |
+| `npm run backend-probe` | 探测 `codely-*` 别名背后的真实后端模型（读网关透传的 `resp.model`） |
 | `npm run setup` | 安装/更新配置（自动检测可用模型，备份原文件为 `*.bak-codely`） |
 | `npm start` | 启动代理（默认 `127.0.0.1:8790`，`--port N` 可改端口，需与 setup 的 `--port` 一致） |
 | `npm test` | 冒烟测试（healthz / models / 一次对话） |
@@ -103,7 +132,7 @@ setup 支持的参数：`--port N`（代理端口）、`--set-default`（设为 
 | `欢迎使用Codely, 访问 https://codely.tuanjie.cn/` | 网关 UA 校验未过——请确认请求走的是本代理而不是直连网关（检查 settings.yaml 里 `codely` 的 baseURL 是 `127.0.0.1:8790`） |
 | `非法session` | 会话标识缺失——同上，必须经过代理；或代理版本过旧 |
 | 代理日志反复 `上游返回 401` | 密钥失效且自动刷新失败 → 重新 `npm run login`，再 `npm run setup` |
-| 代理日志 `模型被团队权限拒绝`，或 dsh 报 `team not allowed to access model` | 上游已把该模型（如 `GLM-5.3`）从你团队可访问列表移除（`/v1/models` 里已无此模型）→ 在 dsh 改用仍在列表内的模型：`codely-core` / `codely-flash` / `codely-air` / `codely-basic` / `codely-vl` |
+| 代理日志 `模型被团队权限拒绝`，或 dsh 报 `team not allowed to access model` | 上游团队白名单不含该模型（如 `GLM-5.2` / `glm-5.2-max` 等，白名单仅 `codely-*` 别名）→ 在 dsh 改用列表内的模型：`codely-core` / `codely-flash` / `codely-air` / `codely-basic` / `codely-vl`；换 key/换团队无效（密钥幂等、白名单随团队固定），重跑 `npm run setup` 也只会同步白名单内模型 |
 | 想确认代理状态 | `curl http://127.0.0.1:8790/healthz` |
 | 换了 Codely 账号/组织 | 重新 `npm run login` + `npm run setup` |
 | 登录时浏览器没自动打开 | 手动复制终端打印的 Verification URL 到浏览器打开 |

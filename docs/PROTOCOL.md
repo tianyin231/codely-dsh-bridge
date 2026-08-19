@@ -93,10 +93,29 @@ curl https://codely-litellm.tuanjie.cn/v1/chat/completions \
 
 ## 4. 错误对照表
 
+### 4.0 alias 真实后端（网关透传实测 2026-08）
+
+`/v1/models` 只返回 5 个 `codely-*` alias。但 LiteLLM 网关会在 `chat.completions` 响应的 `model` 字段**透传真实后端模型名**（路由层填充，非模型自报），据此可实锤每个 alias 背后是谁：
+
+| alias | 真实后端（resp.model 透传，同系可能多部署轮换） | 说明 |
+|---|---|---|
+| `codely-core` | `glm-5-fp8-128k` **或** `glm-5-2-260617` | GLM-5 系，**多个部署负载均衡轮换**，上下文统一 **128K**（非 1M） |
+| `codely-flash` | `deepseek-v4-flash-0731` | DeepSeek-V4-Flash |
+| `codely-air` / `codely-basic` | `deepseek-v4-flash-0731` | 与 flash 同一后端 |
+| `codely-vl` | `qwen3.5-397b-a17b` | Qwen3.5 MoE（397B，17B 激活） |
+
+> **关键：`codely-core` 的映射非单一**——gateway 在同一 alias 背后做 GLM-5 多后端负载均衡（如 `glm-5-fp8-128k`、`glm-5-2-260617`），不同启动/请求透传的精确版本号不同：连续单独采样常稳定到 `glm-5-fp8-128k`，但并发/跨请求可能见到 `glm-5-2-260617`。判断 alias「是什么」应按**系/家族**（core=GLM-5 系、flash=DeepSeek-V4-Flash、vl=Qwen3.5 MoE），而非某一次精确版本号。`contextWindow` 用系的统一窗口（GLM-5 系 128K），不随轮换变化，探测逻辑见下方。
+
+即官方 agent 的 `core(GLM-5.2_MAX)` ≈ `codely-core`（GLM-5）+ `codely-flash`（DeepSeek-V4-Flash fast）混合额度，基本等价。
+
+⚠️ 注意：`/v1/models` 里 `codely-core` 声明的 `max_model_len=1048576` 与真实 GLM-5 系(128K) **不符**。窗口信息应以 `backend-probe` 实测为准（本项目 `setup.js`/代理均按 128K 写入 dsh），而非上游 alias 声明。核对可用 `npm run backend-probe`。
+
+**探测逻辑**（`auth.probeBackends`）：对每 alias 采样 `samples` 次（默认 3，取出现次数最多的后端，消抖负载均衡轮换），失败逐次跳过；经代理时带 `x-codely-probe` 头不刷代理日志。
+
 | HTTP | message | 含义 |
 |---|---|---|
 | 401 | `LiteLLM Virtual Key expected... expected to start with 'sk-'` | 密钥格式/值不对 → 重新换 key |
-| 401 | `team not allowed to access model ... This team can only access models=['alias-only-proxy-models']` | 模型被团队权限拒绝（换 key 无效，密钥幂等）→ 改用 `/v1/models` 列表内的模型（`codely-*`）。2026-08 实测 `GLM-5.2/GLM-5.3` 曾从列表移除，网关多实例灰度期间偶发 200/401 交替 |
+| 401 | `team not allowed to access model ... This team can only access models=['alias-only-proxy-models']` | 模型被团队权限拒绝：团队白名单只放行 `codely-*` 别名，**其他任何命名一律 401**（换 key 无效——密钥按账号幂等、白名单随团队固定）。`glm-5.2-max` / `GLM-5.2` / `GLM-5.3` 及 `codely-glm-*`、真实模型名（如 `deepseek-v4-flash`）实测全部拒绝 → 只能用 `/v1/models` 返回列表内的模型。注：Codely 自家网页 agent 里可选 GLM 属于服务端独立鉴权/预置，客户端 `sk-` 密钥拿不到该通道 |
 | 400 | `欢迎使用Codely, 访问 ...` | UA 校验未过 → 见 §2.2 |
 | 400 | `非法session` | 缺会话标识 → 见 §2.3 |
 | 405 | `Method Not Allowed`（`/v1/models/<id>:generateContent`） | 网关不开放 Gemini 原生格式，用 OpenAI 格式 |

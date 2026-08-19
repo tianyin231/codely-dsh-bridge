@@ -145,6 +145,7 @@ function attemptForward(req, apiKey, body) {
 
 async function handle(req, res, body) {
   const started = Date.now();
+  const isProbe = req.headers['x-codely-probe'] === '1'; // 内部探测请求，不刷 [proxy] 日志
   let lastErr = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     let apiKey;
@@ -163,14 +164,14 @@ async function handle(req, res, body) {
       }
       if (r.passthrough) {
         // 模型被团队权限拒绝：原样透传上游错误，让 dsh 显示真实原因
-        log('proxy', `${req.method} ${req.url} -> ${r.passthrough.status} (${Date.now() - started}ms, 模型被拒透传${r.model ? `, model=${r.model}` : ''})`);
+        if (!isProbe) log('proxy', `${req.method} ${req.url} -> ${r.passthrough.status} (${Date.now() - started}ms, 模型被拒透传${r.model ? `, model=${r.model}` : ''})`);
         const h = { ...r.passthrough.headers };
         delete h['content-length'];
         res.writeHead(r.passthrough.status, h);
         res.end(r.passthrough.body);
         return;
       }
-      log('proxy', `${req.method} ${req.url} -> ${r.ur.statusCode} (${Date.now() - started}ms${r.model ? `, model=${r.model}` : ''})`);
+      if (!isProbe) log('proxy', `${req.method} ${req.url} -> ${r.ur.statusCode} (${Date.now() - started}ms${r.model ? `, model=${r.model}` : ''})`);
       const h = { ...r.ur.headers };
       delete h['content-length']; // 会话注入可能改写请求体，上游长度对本端无意义
       res.writeHead(r.ur.statusCode, h);
@@ -209,4 +210,48 @@ server.listen(PORT, BIND, () => {
   log('proxy', `凭据: ${creds ? creds.source : '未找到（npm run login 或用官方 CLI 登录）'}`);
   const k = loadCachedKey();
   log('proxy', `密钥缓存: ${k ? k.slice(0, 6) + '...' : '无（首个请求时自动获取）'}`);
+  reportBackends();
 });
+
+/* ─── 启动时探测真实后端并同步到 dsh 模型选择界面 ───
+ * 流程：GET /v1/models → 探测各 alias 真实后端 → buildModels → 写回 ~/.dsh/settings.yaml。
+ * dsh 监听 settings/document-updated 会自动刷新模型选择页，实现"启动即实时映射"。
+ * 若无法写 dsh 配置（如只读），退化为仅打印参考；失败不阻塞代理启动。 */
+const KNOWN_ALIASES = ['codely-core', 'codely-flash', 'codely-air', 'codely-basic', 'codely-vl'];
+const coconfig = require('./codely-config');
+
+async function reportBackends() {
+  setTimeout(async () => {
+    try {
+      log('probe', `探测真实后端（经本代理，共 ${KNOWN_ALIASES.length} 个 alias）...`);
+      // 1) GET /v1/models（经本代理，得到当前可用 alias 快照——含官方新放行的模型）
+      let liveData = [];
+      try {
+        const key = await getKey();
+        liveData = await auth.fetchAvailableModels(key, { proxyBaseURL: `http://127.0.0.1:${PORT}/v1` });
+      } catch (e) {
+        log('probe', `模型列表获取失败（${e.message}），使用默认 alias 列表`);
+        liveData = KNOWN_ALIASES.map((id) => ({ id }));
+      }
+      const probeTargets = liveData.map((m) => m.id);
+      // 2) 探测各 alias 真实后端（探测实时列表，新放行的 alias 会自动纳入映射）
+      const rows = await auth.probeBackends(probeTargets, { base: `http://127.0.0.1:${PORT}/v1`, samples: 2, concurrency: 3 });
+      for (const r of rows) {
+        if (r.error) { log('probe', `  ${r.alias.padEnd(15)} -> 探测失败 (${r.error})`); continue; }
+        const w = r.contextWindow ? `${Math.round(r.contextWindow / 1024)}K` : '?';
+        const modal = r.input?.includes('image') ? ', 支持图片' : '';
+        log('probe', `  ${r.alias.padEnd(15)} -> ${r.backend}  (上下文 ${w}${modal})`);
+      }
+      // 3) 合并并写回 dsh 配置
+      const models = coconfig.buildModels(liveData, rows);
+      try {
+        coconfig.writeCodelyProvider({ port: PORT, models });
+        log('probe', `已同步 ${models.length} 个模型到 ~/.dsh/settings.yaml，dsh 模型选择界面将自动刷新`);
+      } catch (e) {
+        log('probe', `写入 dsh 配置失败（${e.message}），不影响代理运行；可手动 npm run setup`);
+      }
+    } catch (e) {
+      log('probe', `探测真实后端失败: ${e.message}`);
+    }
+  }, 300);
+}
