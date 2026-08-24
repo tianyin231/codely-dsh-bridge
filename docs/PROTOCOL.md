@@ -74,6 +74,32 @@ X-Stainless-Retry-Count: 0
 
 对值本身无校验（任意持久 UUID 即可），本代理两者都注入。
 
+### 2.4 请求签名（X-Codely-Signature，2026-08-24 起强制）
+
+**现状**：网关对发往 `codely-litellm.tuanjie.cn` 的请求（实测含 `/v1/chat/completions`；`/v1/models`、`/key/info` 暂未强制）校验 `X-Codely-Signature` 头。缺失/错误/过期返回 401（旧 CLI 因不带此头整体被拒，报「由于安全问题，请升级到最新版 Codely」）：
+
+```json
+{"error":{"message":"由于安全问题，请升级到最新版 Codely：https://codely.tuanjie.cn/download (Due to a security issue, please upgrade to the latest version of Codely: https://codely.tuanjie.cn/download)","type":"auth_error","param":"x-codely-signature","code":"401"}}
+```
+
+**算法**（逆向自官方 CLI `1.0.0-nightly.54` bundle，`VCt` fetch 包装器）：
+
+```
+k1         = HMAC-SHA256(SECRET, "codely-signing-v1")
+signingKey = HMAC-SHA256(k1, <sk- 密钥>)
+sig        = HMAC-SHA256(signingKey, "v1\n<URL pathname>\n<unix 秒>") → base64url
+头部值     = "v1.<unix 秒>.<sig>"
+SECRET     = hex 406f00f74768ba0cb0cd30f097ec6c2bdacb89c61a38b7dd140838bbd0e98018
+```
+
+要点：
+
+- **签名绑定时钟**：timestamp 取请求时刻的 unix 秒，网关有新鲜度窗口 → 每次请求必须现场生成，不可缓存/复用。
+- **签名绑定路径**：`pathname` 来自实际请求 URL（如 `/v1/chat/completions`），跨路径复用无效。
+- **签名绑定密钥**：`signingKey` 由 sk- 密钥派生 → 换 key 后必须重签（代理在 `attemptForward` 内按当前 key 现场生成，切换账号自动正确）。
+- 官方 CLI 仅对主机为 `codely-litellm.tuanjie.cn`（或其子域）且 https 的请求附加此头（环境变量 `CODELY_LITELLM_SIGNING_HOSTS` 可追加额外主机）。
+- 本仓库实现：`codely-auth.js` 的 `signRequest(apiKey, pathname)`（直连模式与代理共用同一实现）。
+
 ## 3. 最小可用请求示例
 
 ```bash
@@ -114,6 +140,7 @@ curl https://codely-litellm.tuanjie.cn/v1/chat/completions \
 
 | HTTP | message | 含义 |
 |---|---|---|
+| 401 | `由于安全问题，请升级到最新版 Codely…`（`param: x-codely-signature`） | 请求签名缺失/错误/过期 → 见 §2.4（用 `signRequest` 现场重签；注意时间戳有新窗口、路径与密钥绑定） |
 | 401 | `LiteLLM Virtual Key expected... expected to start with 'sk-'` | 密钥格式/值不对 → 重新换 key |
 | 401 | `team not allowed to access model ... This team can only access models=['alias-only-proxy-models']` | 模型被团队权限拒绝：团队白名单只放行 `codely-*` 别名，**其他任何命名一律 401**（换 key 无效——密钥按账号幂等、白名单随团队固定）。`glm-5.2-max` / `GLM-5.2` / `GLM-5.3` 及 `codely-glm-*`、真实模型名（如 `deepseek-v4-flash`）实测全部拒绝 → 只能用 `/v1/models` 返回列表内的模型。注：Codely 自家网页 agent 里可选 GLM 属于服务端独立鉴权/预置，客户端 `sk-` 密钥拿不到该通道 |
 | 400 | `欢迎使用Codely, 访问 ...` | UA 校验未过 → 见 §2.2 |
@@ -166,6 +193,7 @@ curl https://codely-litellm.tuanjie.cn/v1/chat/completions \
 - 真实请求走 OpenAI SDK（`X-Stainless-*` 头组）打 `/v1/chat/completions`
 - `fetchCliApiKey()`：GET `${codely.tuanjie.cn}/api/api-token/cli-api-key?teamId=...`
 - 默认 base URL 常量 `$5 = "https://codely-litellm.tuanjie.cn/v1"`（硬编码，无环境变量可覆盖）
+- 请求签名：`VCt` fetch 包装器对所有发往签名主机（`codely-litellm.tuanjie.cn`，可用环境变量 `CODELY_LITELLM_SIGNING_HOSTS` 追加）的请求附加 `X-Codely-Signature`（HMAC-SHA256，见 §2.4）
 - `/report/{success,failure,tool-call}` 为事后遥测上报，与请求放行无关
 
 ## 6. 免责声明

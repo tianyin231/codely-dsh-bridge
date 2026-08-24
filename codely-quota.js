@@ -32,12 +32,14 @@ async function fetchJson(url, headers) {
   return res.json();
 }
 
-/** 网关 /key/info（sk- 密钥的速率限制与累计消费；失败静默，不影响主流程） */
+/** 网关 /key/info（sk- 密钥的速率限制与累计消费；失败静默，不影响主流程）
+ *  带 X-Codely-Signature 签名（官方 CLI 对所有网关请求都签名，提前免疫网关收紧） */
 async function fetchKeyInfo(apiKey) {
   try {
     const j = await fetchJson(`https://${auth.LITELLM_HOST}/key/info`, {
       Authorization: `Bearer ${apiKey}`,
       Accept: 'application/json',
+      'X-Codely-Signature': auth.signRequest(apiKey, '/key/info'),
     });
     const info = j?.info;
     if (!info) return null;

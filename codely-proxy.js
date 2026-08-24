@@ -112,6 +112,9 @@ function transformBody(urlPath, body) {
 function attemptForward(req, apiKey, body) {
   return new Promise((resolve, reject) => {
     const { payload, model } = transformBody(req.url, body);
+    // X-Codely-Signature：网关新校验（2026-08-24 收紧），缺失/过期返回 401「由于安全问题…」。
+    // 用当前密钥 + 请求 pathname + 当前时刻现场生成；换 key 重试会自动重签。
+    const sig = auth.signRequest(apiKey, new URL(req.url, 'http://x').pathname);
     const up = https.request({
       hostname: UPSTREAM_HOST,
       port: 443,
@@ -120,6 +123,7 @@ function attemptForward(req, apiKey, body) {
       headers: {
         ...CLIENT_HEADERS,
         Authorization: `Bearer ${apiKey}`,
+        'X-Codely-Signature': sig,
         'x-litellm-session-id': getSessionId(),
         'Content-Type': req.headers['content-type'] || 'application/json',
         Accept: req.headers.accept || 'application/json',

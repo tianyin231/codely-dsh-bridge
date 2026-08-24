@@ -134,6 +134,33 @@ const CLIENT_HEADERS = {
   'X-Stainless-Retry-Count': '0',
 };
 
+/* ─── X-Codely-Signature 请求签名（官方 CLI 1.0.0-nightly.54 起网关的新校验）───
+ * 逆向自官方 CLI bundle（gemini.js）：网关对 codely-litellm.tuanjie.cn 的请求会校验
+ * `X-Codely-Signature` 头，缺失/错误返回 401「由于安全问题，请升级到最新版 Codely」。
+ * 官方 CLI 会对其发往该主机的每一个请求（含 /v1/models、/key/info）都附加签名。
+ *
+ * 算法（官方 `VCt` fetch 包装器）：
+ *   k1         = HMAC-SHA256(SECRET, "codely-signing-v1")
+ *   signingKey = HMAC-SHA256(k1, <sk- 密钥>)
+ *   sig        = HMAC-SHA256(signingKey, "v1\n<URL pathname>\n<unix 秒>") → base64url
+ *   头部值     = `v1.<unix 秒>.<sig>`
+ * SECRET 是官方 CLI 内置常量（bundle 明文，无隐私性）；timestamp 参与签名，
+ * 网关有新鲜度窗口，因此**每次请求必须现场生成、不可缓存**。 */
+const SIGNING_SECRET = Buffer.from('406f00f74768ba0cb0cd30f097ec6c2bdacb89c61a38b7dd140838bbd0e98018', 'hex');
+
+/** 生成 X-Codely-Signature 头的值（tsSec 为 unix 秒字符串） */
+function codelySignature(apiKey, pathname, tsSec) {
+  const k1 = crypto.createHmac('sha256', SIGNING_SECRET).update('codely-signing-v1').digest();
+  const signingKey = crypto.createHmac('sha256', k1).update(apiKey).digest();
+  const sig = crypto.createHmac('sha256', signingKey).update(['v1', pathname, tsSec].join('\n')).digest('base64url');
+  return `v1.${tsSec}.${sig}`;
+}
+
+/** 生成「当前时刻」的签名头值（每次请求现场调用，勿缓存） */
+function signRequest(apiKey, pathname) {
+  return codelySignature(apiKey, pathname, String(Math.floor(Date.now() / 1000)));
+}
+
 /** 用 sk- 密钥查询当前账号实际可用的模型列表（GET /v1/models）
  *  返回 upstream 原始 data 数组：[{id, object, created, owned_by, is_alias, max_model_len?}, ...]
  *  不同账号/会员档位返回的列表不同（如 GLM 系列仅会员可用）。
@@ -154,7 +181,7 @@ async function fetchAvailableModels(apiKey, { proxyBaseURL } = {}) {
     } catch { /* 代理不可用/异常：回退直连 */ }
   }
   const res = await fetch(`https://${LITELLM_HOST}/v1/models`, {
-    headers: { ...CLIENT_HEADERS, Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+    headers: { ...CLIENT_HEADERS, Authorization: `Bearer ${apiKey}`, Accept: 'application/json', 'X-Codely-Signature': signRequest(apiKey, '/v1/models') },
   });
   if (!res.ok) throw new Error(`查询可用模型失败: HTTP ${res.status}`);
   const j = await res.json();
@@ -224,10 +251,11 @@ async function probeBackends(aliases, { base, apiKey, concurrency = 4, samples =
           headers['x-codely-probe'] = '1';
           const body = { model: alias, messages: [{ role: 'user', content: '验证' }], max_completion_tokens: 4, stream: false };
           if (direct) {
-            // 直连：网关校验官方 CLI 身份特征并强制会话标识，缺失会被 400/非法 session 拒绝
+            // 直连：网关校验官方 CLI 身份特征、强制会话标识并校验 X-Codely-Signature 请求签名
             headers.Authorization = `Bearer ${apiKey}`;
             Object.assign(headers, CLIENT_HEADERS);
             headers['x-litellm-session-id'] = sessionId;
+            headers['X-Codely-Signature'] = signRequest(apiKey, `${new URL(b).pathname.replace(/\/+$/, '')}/chat/completions`);
             body.litellm_session_id = sessionId;
             body.metadata = { session_id: sessionId };
           }
@@ -260,4 +288,4 @@ async function probeBackends(aliases, { base, apiKey, concurrency = 4, samples =
   return results;
 }
 
-module.exports = { loadCreds, getAccessToken, refreshAccessToken, fetchApiKey, fetchAvailableModels, probeBackends, BACKEND_META, LOCAL_CREDS, BASE, LITELLM_HOST, CLIENT_HEADERS };
+module.exports = { loadCreds, getAccessToken, refreshAccessToken, fetchApiKey, fetchAvailableModels, probeBackends, BACKEND_META, LOCAL_CREDS, BASE, LITELLM_HOST, CLIENT_HEADERS, codelySignature, signRequest };
