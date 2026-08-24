@@ -1,6 +1,6 @@
 {
   "name": "codely-dsh-bridge",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "把 Codely（Unity 中国旗下 AI 智能体，官方 agent：Tuanjie Cowork）账号的模型额度经本地代理接入 dsh（DeepSeek Harness）使用，支持多账号管理与丝滑切换",
   "main": "codely-proxy.js",
   "bin": {
